@@ -128,27 +128,6 @@ def pvs_list() -> list[dict]:
 
 
 @mcp.tool()
-def meeting_record_and_transcribe(
-    local_speakers: str | None = None,
-    remote_speakers: str | None = None,
-    model: str | None = None,
-) -> dict:
-    """Stop a running recording, then transcribe it immediately.
-
-    Args:
-        local_speakers: Comma-separated names of people at the mic
-        remote_speakers: Comma-separated names of people on the call
-        model: Whisper model override (default from config)
-    """
-    stop_result = stop_recording()
-    if "error" in stop_result:
-        return stop_result
-
-    file_path = stop_result["file"]
-    return meeting_transcribe(file_path, local_speakers, remote_speakers, model)
-
-
-@mcp.tool()
 def meeting_cleanup() -> dict:
     """Remove meeting audio recordings older than 30 days."""
     removed = cleanup_old_recordings()
