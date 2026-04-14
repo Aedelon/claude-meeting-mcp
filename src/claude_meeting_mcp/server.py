@@ -44,9 +44,9 @@ Step 2: "Transcription quality?" → fast (medium), balanced (large-v3-turbo), b
 Step 3: "Multiple speakers per side?" → diarization.enabled + ask backend (pyannote/whisperx)
 Step 4: "Auto-generate meeting minutes after transcription?" → pv.auto_generate (true/false)
 Step 5: "Local or remote transcription?" → if remote: set URL via meeting_configure.
-  API KEY SETUP — NEVER ask for API keys or tokens in the conversation.
-  Tell the user: "Set TRANSCRIPTION_API_KEY in your environment or Claude Desktop config."
-  For HF_TOKEN (diarization): same — "Set HF_TOKEN in your environment."
+  NEVER ask for API keys or tokens in the conversation.
+  Tell user: "Set TRANSCRIPTION_API_KEY in your env or Claude Desktop config (env section)."
+  For HF_TOKEN (diarization): "Set HF_TOKEN in your env or Claude Desktop config."
 After each step, confirm and ask "Next setting, or all done?"
 Show final config summary at the end.
 
