@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.uv/
+
+# Audio recordings (données sensibles)
+recordings/*.wav
+recordings/*.mp3
+recordings/*.m4a
+
+# Swift build
+src/audiocap/.build/
+src/audiocap/.swiftpm/
+
+# macOS
+.DS_Store
+*.swp
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
