@@ -67,7 +67,11 @@ def _transcribe_mlx(audio: np.ndarray, samplerate: int, model: str | None = None
         audio,
         path_or_hf_repo=model_id,
         language=language,
-        word_timestamps=False,
+        word_timestamps=True,
+        condition_on_previous_text=False,
+        hallucination_silence_threshold=1.0,
+        compression_ratio_threshold=2.4,
+        no_speech_threshold=0.6,
     )
     return result.get("segments", [])
 
