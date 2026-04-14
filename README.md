@@ -1,11 +1,12 @@
 # claude-meeting-mcp
 
-MCP Server cross-platform pour enregistrer des reunions (Google Meet) et les transcrire automatiquement en local.
+MCP Server cross-platform pour enregistrer des reunions et les transcrire automatiquement.
 
 ## Features
 
+- Compatible avec toute app de visio (Google Meet, Teams, Zoom, Slack, Discord, etc.)
 - Capture audio systeme + micro (stereo WAV, L=systeme, R=micro)
-- Transcription locale avec Whisper (MLX sur macOS, faster-whisper sur Windows/Linux)
+- Transcription avec Whisper en local ou via API remote
 - Attribution automatique des locuteurs (canaux stereo L/R)
 - Mode remote optionnel (API compatible OpenAI Whisper)
 - Configuration globale TOML (modele, langue, speakers)

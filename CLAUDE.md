@@ -1,7 +1,7 @@
 # claude-meeting-mcp
 
 ## Projet
-MCP Server cross-platform pour enregistrer des reunions (Google Meet) et les transcrire automatiquement.
+MCP Server cross-platform pour enregistrer des reunions (Google Meet, Teams, Zoom, Slack, Discord, etc.) et les transcrire automatiquement.
 Developpe par Delanoe pour le projet d'app comptable avec Bruno.
 
 ## Architecture

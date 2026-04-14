@@ -23,7 +23,13 @@ from .transcriber import _get_backend, transcribe_meeting
 
 mcp = FastMCP(
     "claude-meeting-mcp",
-    instructions="Record meetings (mic + system audio) and transcribe locally with Whisper",
+    instructions=(
+        "Record meetings from any video conferencing app "
+        "(Google Meet, Teams, Zoom, Slack, Discord, etc.) "
+        "by capturing system audio + microphone. "
+        "Transcribe with Whisper locally or via a remote API. "
+        "Automatically generate meeting minutes (PV)."
+    ),
 )
 
 
