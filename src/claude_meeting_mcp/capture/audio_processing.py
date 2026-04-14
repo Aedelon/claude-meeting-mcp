@@ -7,6 +7,7 @@ macOS uses the same chain in Swift (audiocap).
 from __future__ import annotations
 
 import numpy as np
+from scipy.signal import lfilter
 
 
 def process_stereo(
@@ -46,8 +47,8 @@ def process_stereo(
     right = _normalize(right, target_rms, max_gain)
 
     # Step 2: Compress — reduce dynamic range
-    attack_coeff = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
-    release_coeff = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
+    attack_coeff = float(np.exp(-1.0 / (sample_rate * attack_ms / 1000.0)))
+    release_coeff = float(np.exp(-1.0 / (sample_rate * release_ms / 1000.0)))
     left = _compress(left, comp_threshold, comp_ratio, attack_coeff, release_coeff)
     right = _compress(right, comp_threshold, comp_ratio, attack_coeff, release_coeff)
 
@@ -60,7 +61,7 @@ def process_stereo(
 
 def _normalize(audio: np.ndarray, target_rms: float, max_gain: float) -> np.ndarray:
     """RMS normalization with gain cap."""
-    rms = np.sqrt(np.mean(audio**2))
+    rms = float(np.sqrt(np.mean(audio**2)))
     if rms > 0.001:
         gain = min(target_rms / rms, max_gain)
         audio *= gain
@@ -74,28 +75,29 @@ def _compress(
     attack_coeff: float,
     release_coeff: float,
 ) -> np.ndarray:
-    """Envelope-following compressor with attack/release."""
-    envelope = 0.0
-    out = np.empty_like(audio)
+    """Vectorized envelope-following compressor with attack/release.
 
-    for i in range(len(audio)):
-        sample = audio[i]
-        abs_sample = abs(sample)
+    Uses scipy.signal.lfilter for the envelope follower (vectorized IIR filter)
+    instead of a Python for-loop over samples.
+    """
+    abs_audio = np.abs(audio)
 
-        # Envelope follower
-        if abs_sample > envelope:
-            envelope = attack_coeff * envelope + (1.0 - attack_coeff) * abs_sample
-        else:
-            envelope = release_coeff * envelope + (1.0 - release_coeff) * abs_sample
+    # Envelope follower via 1-pole IIR filter on absolute signal
+    # attack path: fast response to transients
+    # release path: slow decay
+    # Approximate: use release coeff for the main envelope, then take max with attack
+    # This is the standard "peak detector" approach used in audio compressors
+    envelope_release = lfilter([1.0 - release_coeff], [1.0, -release_coeff], abs_audio)
+    envelope_attack = lfilter([1.0 - attack_coeff], [1.0, -attack_coeff], abs_audio)
+    envelope = np.maximum(envelope_attack, envelope_release).astype(np.float32)
 
-        # Gain reduction above threshold
-        if envelope > threshold:
-            over_db = 20.0 * np.log10(envelope / threshold)
-            reduced_db = over_db / ratio
-            target_level = threshold * (10.0 ** (reduced_db / 20.0))
-            gain = target_level / envelope
-            out[i] = sample * gain
-        else:
-            out[i] = sample
+    # Compute gain reduction: only where envelope exceeds threshold
+    gain = np.ones_like(audio)
+    above = envelope > threshold
+    if np.any(above):
+        over_db = 20.0 * np.log10(envelope[above] / threshold)
+        reduced_db = over_db / ratio
+        target_level = threshold * np.power(10.0, reduced_db / 20.0)
+        gain[above] = target_level / envelope[above]
 
-    return out
+    return audio * gain

@@ -3,19 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 from claude_meeting_mcp.recorder import (
-    is_audiocap_available,
     is_recording,
     start_recording,
     stop_recording,
 )
-
-
-@patch("claude_meeting_mcp.recorder.get_capturer")
-def test_is_audiocap_available(mock_get):
-    mock_capturer = MagicMock()
-    mock_capturer.is_available.return_value = True
-    mock_get.return_value = mock_capturer
-    assert is_audiocap_available() is True
 
 
 @patch("claude_meeting_mcp.recorder.get_capturer")

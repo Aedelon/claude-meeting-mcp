@@ -105,7 +105,7 @@ async def _call_sampling(
     ctx: Context,
     user_text: str,
     system_prompt: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> str:
     """Call MCP sampling to get LLM-generated text."""
     result = await ctx.session.create_message(

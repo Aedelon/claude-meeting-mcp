@@ -7,7 +7,6 @@ import sys
 from typing import Annotated
 
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import ClientCapabilities, SamplingCapability
 from pydantic import Field
 
 from .capture import get_capturer
@@ -294,7 +293,13 @@ async def generate_meeting_pv(
 
     transcription = Transcription.from_json(path.read_text(encoding="utf-8"))
 
-    if not ctx.session.check_client_capability(ClientCapabilities(sampling=SamplingCapability())):
+    # Check if client supports sampling
+    has_sampling = (
+        ctx.session.client_params is not None
+        and ctx.session.client_params.capabilities is not None
+        and ctx.session.client_params.capabilities.sampling is not None
+    )
+    if not has_sampling:
         return {
             "error": "Client does not support MCP Sampling. "
             "Generate PV manually by reading the transcription."
