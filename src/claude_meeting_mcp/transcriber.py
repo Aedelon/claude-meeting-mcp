@@ -175,16 +175,38 @@ def _ensure_faster_model() -> None:
     logger.info("Faster-whisper model loaded: %s", model_id)
 
 
+WHISPER_SAMPLE_RATE = 16000
+
+
+def _resample_to_16k(audio: np.ndarray, samplerate: int) -> np.ndarray:
+    """Resample audio to 16kHz (what Whisper expects internally)."""
+    if samplerate == WHISPER_SAMPLE_RATE:
+        return audio
+    from scipy.signal import resample
+
+    new_length = int(len(audio) * WHISPER_SAMPLE_RATE / samplerate)
+    logger.info(
+        "Resampling %d Hz → %d Hz (%d → %d samples)",
+        samplerate,
+        WHISPER_SAMPLE_RATE,
+        len(audio),
+        new_length,
+    )
+    return resample(audio, new_length).astype(np.float32)
+
+
 def transcribe_channel(audio: np.ndarray, samplerate: int, model: str | None = None) -> list[dict]:
     """Transcribe a single audio channel using the configured backend."""
+    # Resample to 16kHz — Whisper is trained on 16kHz and internal resampling
+    # from 48kHz can produce artifacts/hallucinations
+    audio = _resample_to_16k(audio, samplerate)
     backend = _get_backend()
 
     if backend == "mlx":
-        return _transcribe_mlx(audio, samplerate, model)
+        return _transcribe_mlx(audio, WHISPER_SAMPLE_RATE, model)
     elif backend == "faster":
-        return _transcribe_faster(audio, samplerate, model)
+        return _transcribe_faster(audio, WHISPER_SAMPLE_RATE, model)
     else:
-        # Remote backend handled separately in transcribe_meeting
         raise RuntimeError("Remote backend should not call transcribe_channel directly")
 
 
