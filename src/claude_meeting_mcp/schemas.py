@@ -1,9 +1,7 @@
 """JSON schemas for transcription output."""
 
-from dataclasses import dataclass, field
-from typing import Optional
 import json
-from datetime import datetime
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -22,7 +20,9 @@ class Transcription:
     meeting_id: str
     date: str
     duration_seconds: float
-    speakers: dict[str, str] = field(default_factory=lambda: {"left": "Interlocuteur", "right": "Delanoe"})
+    speakers: dict[str, str] = field(
+        default_factory=lambda: {"left": "Interlocuteur", "right": "Delanoe"}
+    )
     segments: list[Segment] = field(default_factory=list)
 
     def to_dict(self) -> dict:

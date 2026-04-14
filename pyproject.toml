@@ -1,10 +1,10 @@
 [project]
 name = "claude-meeting-mcp"
-version = "0.1.0"
-description = "MCP Server for meeting recording and transcription on macOS (Core Audio Taps + MLX-Whisper)"
+version = "0.2.0"
+description = "MCP Server for meeting recording and transcription (macOS, Windows, Linux)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Delanoe" }]
 
 dependencies = [
@@ -15,6 +15,8 @@ dependencies = [
     "soundfile>=0.12.0",
     "platformdirs>=4.0.0",
     "httpx>=0.27.0",
+    "PyAudioWPatch>=0.2.12; sys_platform == 'win32'",
+    "sounddevice>=0.4.6; sys_platform != 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,9 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "ruff>=0.5.0",
 ]
+macos = ["mlx-whisper>=0.4.0"]
+windows = ["PyAudioWPatch>=0.2.12", "sounddevice>=0.4.6"]
+linux = ["sounddevice>=0.4.6"]
 
 [project.scripts]
 claude-meeting-mcp = "claude_meeting_mcp.server:main"
