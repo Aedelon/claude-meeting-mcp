@@ -7,7 +7,6 @@ import Foundation
 final class StereoRecorder {
     private let aggregateID: AudioObjectID
     private let outputURL: URL
-    private let sampleRate: Double = 44100.0
 
     private var ioProcID: AudioDeviceIOProcID?
     private var audioFile: AVAudioFile?
@@ -16,6 +15,7 @@ final class StereoRecorder {
     private var isRunning = false
     private var writerTimer: DispatchSourceTimer?
     private var callbackCount: Int = 0
+    private let sampleRate: Double
 
     /// Ring buffer holds ~5 seconds of stereo float data
     private let ringCapacity: Int
@@ -23,19 +23,15 @@ final class StereoRecorder {
     init(aggregateID: AudioObjectID, outputPath: String) throws {
         self.aggregateID = aggregateID
         self.outputURL = URL(fileURLWithPath: outputPath)
+
+        // Read the actual sample rate from the aggregate device
+        self.sampleRate = StereoRecorder.getDeviceSampleRate(aggregateID) ?? 48000.0
+        fputs("audiocap: Using sample rate: \(sampleRate)\n", stderr)
+
         self.ringCapacity = Int(sampleRate) * 2 * 5  // 5 sec of stereo floats
         self.ringBuffer = RingBuffer(capacity: ringCapacity)
 
-        // Validate that the processing format is constructible
-        guard AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 2,
-            interleaved: false
-        ) != nil else {
-            throw AudioCapError.fileCreationFailed(outputPath)
-        }
-
+        // Create WAV file matching the aggregate's actual sample rate
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: sampleRate,
@@ -59,21 +55,29 @@ final class StereoRecorder {
     }
 
     func start() throws {
-        // Create IOProc - pass self as client data
-        let clientData = Unmanaged.passUnretained(self).toOpaque()
+        // Use block-based IOProc (works correctly with aggregate + tap devices)
         var procID: AudioDeviceIOProcID?
-        let status = AudioDeviceCreateIOProcID(
+
+        let status = AudioDeviceCreateIOProcIDWithBlock(
+            &procID,
             aggregateID,
-            ioProc,
-            clientData,
-            &procID
-        )
+            nil  // Use default dispatch queue
+        ) { [weak self] (
+            _: UnsafePointer<AudioTimeStamp>,
+            inInputData: UnsafePointer<AudioBufferList>,
+            _: UnsafePointer<AudioTimeStamp>,
+            outOutputData: UnsafeMutablePointer<AudioBufferList>,
+            _: UnsafePointer<AudioTimeStamp>
+        ) in
+            self?.handleIOProc(inInputData: inInputData)
+        }
+
         guard status == noErr, let procID = procID else {
             fputs("audiocap: IOProc creation failed: \(status)\n", stderr)
             throw AudioCapError.ioProcFailed(status)
         }
         self.ioProcID = procID
-        fputs("audiocap: IOProc created on aggregate device \(aggregateID)\n", stderr)
+        fputs("audiocap: IOProc (block) created on aggregate device \(aggregateID)\n", stderr)
 
         // Start the device
         let startStatus = AudioDeviceStart(aggregateID, procID)
@@ -104,7 +108,6 @@ final class StereoRecorder {
         writerTimer?.cancel()
         writerTimer = nil
 
-        // Give writer queue time to process
         writerQueue.sync {
             self.flushRingBuffer()
         }
@@ -112,46 +115,28 @@ final class StereoRecorder {
         fputs("audiocap: \(callbackCount) IOProc callbacks processed\n", stderr)
         fputs("audiocap: Ring buffer remaining: \(ringBuffer.availableToRead) samples\n", stderr)
 
-        // Close file
         audioFile = nil
-
         fputs("audiocap: Recording stopped\n", stderr)
     }
 
-    // MARK: - IOProc Callback
+    // MARK: - IOProc Handler
 
-    /// The IOProc callback. Called on a real-time audio thread.
-    private let ioProc: AudioDeviceIOProc = {
-        (
-            _: AudioObjectID,
-            _: UnsafePointer<AudioTimeStamp>,
-            inInputData: UnsafePointer<AudioBufferList>,
-            _: UnsafePointer<AudioTimeStamp>,
-            _: UnsafeMutablePointer<AudioBufferList>,
-            _: UnsafePointer<AudioTimeStamp>,
-            inClientData: UnsafeMutableRawPointer?
-        ) -> OSStatus in
+    private func handleIOProc(inInputData: UnsafePointer<AudioBufferList>) {
+        callbackCount += 1
 
-        guard let clientData = inClientData else { return noErr }
-        let recorder = Unmanaged<StereoRecorder>.fromOpaque(clientData).takeUnretainedValue()
-        recorder.callbackCount += 1
-
-        // Use UnsafeMutableAudioBufferListPointer for safe iteration
         let abl = UnsafeMutableAudioBufferListPointer(
             UnsafeMutablePointer(mutating: inInputData)
         )
 
-        let numBuffers = abl.count
-
         // Debug: log first callback info
-        if recorder.callbackCount == 1 {
-            fputs("audiocap: IOProc first callback - \(numBuffers) buffers\n", stderr)
+        if callbackCount == 1 {
+            fputs("audiocap: IOProc first callback - \(abl.count) buffers\n", stderr)
             for (i, buf) in abl.enumerated() {
                 fputs("audiocap:   buffer[\(i)]: \(buf.mNumberChannels) ch, \(buf.mDataByteSize) bytes\n", stderr)
             }
         }
 
-        // Extract system audio (first buffer) and mic (second buffer)
+        // Extract buffers: first = system tap, second = mic
         var systemPtr: UnsafeMutablePointer<Float>?
         var systemFrames: Int = 0
         var systemChannels: Int = 0
@@ -174,29 +159,26 @@ final class StereoRecorder {
             }
         }
 
-        // If we only have one buffer (system only), still write it with silent mic
+        // Determine frame count
         let frames: Int
-        if let _ = systemPtr, micPtr != nil {
+        if systemPtr != nil && micPtr != nil {
             frames = min(systemFrames, micFrames)
-        } else if let _ = systemPtr {
+        } else if systemPtr != nil {
             frames = systemFrames
         } else {
-            return noErr  // No data at all
+            return  // No data
         }
+        guard frames > 0 else { return }
 
-        guard frames > 0 else { return noErr }
-
-        // Interleave into stereo: L = system, R = mic
-        // We write interleaved pairs [L, R, L, R, ...] into the ring buffer
+        // Interleave: L = system, R = mic
         let stereoCount = frames * 2
         let stereo = UnsafeMutablePointer<Float>.allocate(capacity: stereoCount)
         defer { stereo.deallocate() }
 
         for i in 0..<frames {
-            // Left channel: system audio
+            // Left: system audio (mono mixdown if stereo)
             if let sys = systemPtr {
                 if systemChannels >= 2 {
-                    // Stereo system audio: average L+R to mono
                     stereo[i * 2] = (sys[i * systemChannels] + sys[i * systemChannels + 1]) * 0.5
                 } else {
                     stereo[i * 2] = sys[i]
@@ -205,7 +187,7 @@ final class StereoRecorder {
                 stereo[i * 2] = 0.0
             }
 
-            // Right channel: microphone (or silence if no mic buffer)
+            // Right: mic (or silence)
             if let mic = micPtr {
                 stereo[i * 2 + 1] = mic[i]
             } else {
@@ -213,9 +195,7 @@ final class StereoRecorder {
             }
         }
 
-        recorder.ringBuffer.write(stereo, count: stereoCount)
-
-        return noErr
+        ringBuffer.write(stereo, count: stereoCount)
     }
 
     // MARK: - File Writer
@@ -234,18 +214,15 @@ final class StereoRecorder {
         let available = ringBuffer.availableToRead
         guard available >= 2, let audioFile = audioFile else { return }
 
-        // Must be even (stereo: L, R pairs)
         let toRead = available - (available % 2)
         guard toRead > 0 else { return }
 
-        let frameCount = toRead / 2  // 2 floats per frame (L + R)
+        let frameCount = toRead / 2
 
-        // Read interleaved data from ring buffer
         let interleavedBuf = UnsafeMutablePointer<Float>.allocate(capacity: toRead)
         defer { interleavedBuf.deallocate() }
         ringBuffer.read(into: interleavedBuf, count: toRead)
 
-        // Create non-interleaved AVAudioPCMBuffer (what AVAudioFile expects)
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: audioFile.processingFormat,
             frameCapacity: AVAudioFrameCount(frameCount)
@@ -253,7 +230,6 @@ final class StereoRecorder {
 
         buffer.frameLength = AVAudioFrameCount(frameCount)
 
-        // De-interleave: split [L,R,L,R,...] into separate channel buffers
         guard let channelData = buffer.floatChannelData else { return }
         let leftChannel = channelData[0]
         let rightChannel = channelData[1]
@@ -268,5 +244,19 @@ final class StereoRecorder {
         } catch {
             fputs("audiocap: Write error: \(error)\n", stderr)
         }
+    }
+
+    // MARK: - Helpers
+
+    private static func getDeviceSampleRate(_ deviceID: AudioObjectID) -> Double? {
+        var sampleRate: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &sampleRate)
+        return status == noErr ? sampleRate : nil
     }
 }
