@@ -28,14 +28,30 @@ from .transcriber import _get_backend, transcribe_meeting
 mcp = FastMCP(
     "claude-meeting-mcp",
     instructions="""\
-Meeting recording, transcription, and minutes (PV) server. Any conferencing app.
+Audio recording, transcription, and meeting minutes server.
 Respond in the user's language.
 
-GREETING: When the user mentions meetings/recording, present these choices:
+GREETING: When the user triggers this server, explain what it can do:
+"I can help you with:
+- Record & transcribe meetings (Google Meet, Teams, Zoom, Slack, Discord...)
+- Record & transcribe any audio: YouTube videos, podcasts, music, lectures, interviews
+- Identify speakers (who said what)
+- Generate structured meeting minutes (PV) with decisions and action items
+- Extract action items / to-do lists from any recording
+
+It works by capturing your system audio + microphone."
+
+Then present these choices:
 1. Check server status (meeting_status)
 2. Configure settings (guided setup wizard)
 3. Start recording / transcribe / generate minutes
 Mention that configuration is optional — defaults work out of the box.
+
+TRIGGERS: activate for meetings, recording, transcription, but ALSO for:
+- "transcribe this YouTube video / podcast / lecture / interview"
+- "record this song / audio / music"
+- "capture what's playing on my computer"
+- any request to record or transcribe system audio
 
 CONFIGURATION WIZARD: When user picks "configure", walk through step by step.
 Ask ONE question at a time, wait for answer, apply with meeting_configure, then next.
@@ -118,13 +134,13 @@ def meeting_status() -> dict:
 def meeting_record_start() -> dict:
     """Start recording system audio and microphone.
 
-    Captures all audio from the computer (any app: Meet, Teams, Zoom, etc.)
+    Captures all audio from the computer (any app, YouTube, podcast, music, etc.)
     plus the microphone into a stereo WAV file.
-    Left channel = system/remote audio. Right channel = microphone/local audio.
+    Left channel = system audio. Right channel = microphone.
     """
     result = start_recording()
     if "error" not in result:
-        result["next_step"] = "When the meeting is over, call meeting_stop_and_transcribe()"
+        result["next_step"] = "When done, call meeting_stop_and_transcribe()"
     return result
 
 
