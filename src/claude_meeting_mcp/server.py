@@ -67,12 +67,14 @@ ONBOARDING_INFO = {
 }
 
 
-def _maybe_onboarding(result: dict) -> dict:
-    """Inject onboarding info into the first tool result of the session."""
+def _enrich_result(result: dict) -> dict:
+    """Enrich tool results: full onboarding on first call, config hint always."""
     global _session_greeted
     if not _session_greeted:
         _session_greeted = True
         result["onboarding"] = ONBOARDING_INFO
+    else:
+        result["hint"] = "Settings can be changed anytime with audio_configure()."
     return result
 
 
@@ -151,7 +153,7 @@ def audio_record_start() -> dict:
     result = start_recording()
     if "error" not in result:
         result["next_step"] = "When done, call audio_stop_and_transcribe()"
-    return _maybe_onboarding(result)
+    return _enrich_result(result)
 
 
 @mcp.tool()
@@ -205,7 +207,7 @@ def audio_transcribe(
     local = local_speakers or "Local"
     remote = remote_speakers or "Remote"
     result = transcribe_meeting(file_path, remote, local, model)
-    return _maybe_onboarding(
+    return _enrich_result(
         {
             "meeting_id": result.meeting_id,
             "duration_seconds": result.duration_seconds,
