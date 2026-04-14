@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Annotated
 
@@ -94,6 +95,17 @@ PARAMETERS:
 - After transcription, suggest generating meeting minutes
 """,
 )
+
+_SAFE_ID_RE = re.compile(r"^[\w\-]+$")
+
+
+def _validate_meeting_id(meeting_id: str) -> str | None:
+    """Validate meeting_id to prevent path traversal. Returns error or None."""
+    if not meeting_id or ".." in meeting_id or "/" in meeting_id or "\\" in meeting_id:
+        return "Invalid meeting_id: must not contain path separators"
+    if not _SAFE_ID_RE.match(meeting_id):
+        return "Invalid meeting_id: only alphanumeric, hyphens, underscores allowed"
+    return None
 
 
 # --- Recording & Transcription ---
@@ -223,6 +235,8 @@ def get_transcription(
     meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
 ) -> dict:
     """Retrieve a past transcription by meeting ID."""
+    if err := _validate_meeting_id(meeting_id):
+        return {"error": err}
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return {"error": f"Transcription not found: {meeting_id}"}
@@ -235,6 +249,8 @@ def get_pv(
     meeting_id: Annotated[str, Field(description="Meeting identifier")],
 ) -> dict:
     """Retrieve a previously generated meeting minutes (PV)."""
+    if err := _validate_meeting_id(meeting_id):
+        return {"error": err}
     pv_path = PV_DIR / f"{meeting_id}_pv.md"
     if not pv_path.exists():
         return {"error": f"PV not found for meeting: {meeting_id}"}
@@ -287,6 +303,8 @@ async def generate_meeting_pv(
     meeting minutes with decisions, action items, and speaker attribution.
     For meetings under 1h: single pass. For longer: map-reduce strategy.
     """
+    if err := _validate_meeting_id(meeting_id):
+        return {"error": err}
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return {"error": f"Transcription not found: {meeting_id}"}

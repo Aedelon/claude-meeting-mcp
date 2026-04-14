@@ -7,10 +7,14 @@ build/
 .venv/
 .uv/
 
-# Audio recordings (données sensibles)
+# Audio recordings (sensitive data)
 recordings/*.wav
 recordings/*.mp3
 recordings/*.m4a
+
+# Transcriptions and meeting minutes (sensitive data)
+transcriptions/*.json
+pv/*.md
 
 # Swift build
 src/audiocap/.build/
