@@ -13,15 +13,17 @@ Capture audio (par OS)        → WAV stereo (L=systeme, R=micro)
   Linux : sounddevice (PipeWire/PulseAudio monitor + mic)
     ↓
 Chaine audio                  → Normalisation RMS + Compresseur 4:1 + Limiter
+  macOS : Swift (StereoRecorder.swift)
+  Windows/Linux : Python/numpy/scipy (audio_processing.py)
     ↓
-claude_meeting_mcp (Python)   → MCP Server qui expose les tools a Claude
+claude_meeting_mcp (Python)   → MCP Server (13 tools, 2 resources, 2 prompts)
     ↓
 Transcription (par plateforme)
   macOS Apple Silicon : MLX-Whisper
   Windows/Linux/Intel : faster-whisper (CTranslate2)
   Optionnel : API remote (OpenAI-compatible)
     ↓
-Diarization (optionnelle)     → pyannote-audio 3.1 (identification multi-speakers)
+Diarization (optionnelle)     → pyannote-audio 3.1 (multi-speakers par canal)
     ↓
 transcription .json           → Segments avec timestamps et speaker attribution
     ↓
@@ -46,6 +48,7 @@ PV de reunion .md             → Genere automatiquement via MCP Sampling
 - PyAudioWPatch pour la capture WASAPI loopback Windows
 - sounddevice pour micro Windows/Linux + monitor PipeWire/PulseAudio
 - pyannote-audio 3.1 pour la diarization multi-speakers (optionnel)
+- scipy pour la chaine audio vectorisee (compresseur via lfilter)
 - platformdirs pour les chemins de donnees cross-platform
 - httpx pour le mode de transcription remote
 - Chaine audio : normalisation RMS, compresseur 4:1, limiter -0.5dB
@@ -56,7 +59,7 @@ Fichier : `~/.config/claude-meeting-mcp/config.toml` (Linux), `~/Library/Applica
 ```toml
 [whisper]
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3-turbo, large-v3
-language = "fr"
+language = "en"             # configurable par langue de reunion
 mode = "local"              # "local" ou "remote"
 
 [whisper.remote]
@@ -76,8 +79,43 @@ auto_generate = true
 
 Les participants sont passes par reunion via les tools (pas dans la config globale) :
 ```
-transcribe(file, remote_speakers="Bruno, Alice", local_speakers="Delanoe")
+meeting_transcribe(file, remote_speakers="Bruno, Alice", local_speakers="Delanoe")
+meeting_stop_and_transcribe(remote_speakers="Bruno", local_speakers="Delanoe")
+generate_meeting_pv(meeting_id="...", participants="Bruno, Alice, Delanoe")
 ```
+
+## MCP Tools (13)
+
+| Tool | Description |
+|------|-------------|
+| `meeting_status` | Statut serveur (plateforme, backends, modele, diarization) |
+| `meeting_record_start` | Demarrer l'enregistrement stereo |
+| `meeting_record_stop` | Arreter l'enregistrement |
+| `meeting_transcribe` | Transcrire un fichier WAV existant |
+| `meeting_stop_and_transcribe` | Stop + transcription en un seul appel |
+| `get_transcription` | Recuperer une transcription passee |
+| `get_pv` | Recuperer un PV genere |
+| `recordings_list` | Lister les enregistrements |
+| `transcriptions_list` | Lister les transcriptions |
+| `pvs_list` | Lister les PV |
+| `generate_meeting_pv` | Generer un PV via MCP Sampling |
+| `meeting_configure` | Modifier la configuration |
+| `meeting_cleanup` | Supprimer les enregistrements > 30 jours |
+
+## MCP Resources & Prompts
+
+| Type | URI / Nom | Description |
+|------|-----------|-------------|
+| Resource | `transcription://{meeting_id}` | Transcription brute JSON |
+| Resource | `pv://{meeting_id}` | PV genere en markdown |
+| Prompt | `regenerate_pv` | Regenerer un PV avec instructions custom |
+| Prompt | `extract_action_items` | Extraire les actions d'une reunion |
+
+## Multilinguisme
+- Instructions MCP : trigger words en 8 langues (EN, FR, ES, IT, PT, RU, ZH, HE)
+- Prompts de generation PV : anglais neutre + "Write in the SAME LANGUAGE as the transcription"
+- Claude repond dans la langue de l'utilisateur
+- Whisper language configurable (default: en)
 
 ## Conventions
 - Langue du code : anglais (noms de variables, commentaires, docstrings)
@@ -89,6 +127,7 @@ transcribe(file, remote_speakers="Bruno, Alice", local_speakers="Delanoe")
 - Nommage transcriptions : YYYY-MM-DD_HHhMM_meeting.json
 - Nommage PV : YYYY-MM-DD_HHhMM_meeting_pv.md
 - Retention : 30 jours pour les fichiers audio, transcriptions conservees indefiniment
+- Prefixe `meeting_` sur tous les tools MCP (evite les collisions de namespace)
 
 ## Commandes utiles
 ```bash
@@ -120,8 +159,8 @@ src/
 ├── claude_meeting_mcp/
 │   ├── __init__.py
 │   ├── config.py           # Configuration globale TOML + defaults
-│   ├── server.py           # Point d'entree FastMCP, definition des tools
-│   ├── recorder.py         # Orchestration enregistrement (thin wrapper)
+│   ├── server.py           # FastMCP server, 13 tools, 2 resources, 2 prompts
+│   ├── recorder.py         # Orchestration enregistrement (thread-safe)
 │   ├── transcriber.py      # Dual backend mlx/faster-whisper + remote
 │   ├── diarize.py          # Speaker diarization via pyannote-audio 3.1
 │   ├── pv_generator.py     # Generation PV via MCP Sampling (map-reduce)
@@ -129,7 +168,7 @@ src/
 │   ├── schemas.py          # Schemas JSON pour les transcriptions
 │   └── capture/            # Backends de capture audio par OS
 │       ├── __init__.py     # Protocol AudioCapturer + factory
-│       ├── audio_processing.py  # Chaine audio (normalise, compresse, limite)
+│       ├── audio_processing.py  # Chaine audio vectorisee (scipy.signal.lfilter)
 │       ├── _macos.py       # Core Audio Taps via audiocap Swift
 │       ├── _windows.py     # WASAPI loopback + sounddevice
 │       └── _linux.py       # PipeWire/PulseAudio + sounddevice
@@ -154,11 +193,14 @@ scripts/
 .github/workflows/test.yml  # CI multi-OS (macOS, Windows, Ubuntu)
 ```
 
-## Garde-fous
+## Securite
 - Par defaut, jamais d'envoi de donnees audio vers un service cloud (mode "local")
 - Le mode "remote" est opt-in et utilise une API choisie par l'utilisateur
 - Tout le traitement local utilise Whisper sur le hardware de l'utilisateur
+- Credentials uniquement via env vars (HF_TOKEN, WHISPER_API_KEY) — jamais hardcodes
+- Validation meeting_id contre path traversal (rejet ../ et separateurs)
+- recorder.py protege par threading.Lock (pas de race condition)
+- .gitignore couvre .env, recordings, transcriptions, PV
 - La diarization pyannote necessite un token HuggingFace gratuit (1er telechargement)
-- Les recordings contiennent potentiellement des donnees sensibles
-- Ne pas commit les fichiers .wav ni les transcriptions dans git
 - Permission TCC requise sur macOS pour la capture audio systeme
+- Les recordings contiennent potentiellement des donnees sensibles

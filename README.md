@@ -9,11 +9,12 @@ MCP Server cross-platform pour enregistrer des reunions et les transcrire automa
 - Chaine audio : normalisation RMS + compresseur 4:1 + limiter
 - Transcription avec Whisper en local ou via API remote
 - Diarization multi-speakers via pyannote-audio 3.1 (optionnel)
-- Identification des speakers par Claude (LLM) lors de la generation du PV
+- Identification des speakers par Claude (LLM) via le contenu de la conversation
 - Generation automatique de PV (proces-verbal) via MCP Sampling
 - Participants configures par reunion (pas de setup vocal prealable)
+- Multilingue : 8 langues supportees (EN, FR, ES, IT, PT, RU, ZH, HE)
 - Configuration globale TOML + override par tool
-- Retention configurable des enregistrements (30 jours par defaut)
+- Securise : path traversal protection, credentials via env vars, local par defaut
 - Integration Claude via MCP (Claude Code, Claude Desktop, Cowork)
 
 ## Compatibilite
@@ -71,7 +72,7 @@ Fichier de configuration : `~/.config/claude-meeting-mcp/config.toml`
 ```toml
 [whisper]
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3-turbo, large-v3
-language = "fr"
+language = "en"             # langue de la reunion
 mode = "local"              # "local" ou "remote"
 
 [whisper.remote]
@@ -91,25 +92,25 @@ auto_generate = true
 
 Ou via les tools MCP :
 ```
-configure("whisper.model", "small")
-configure("diarization.enabled", "true")
-configure("diarization.backend", "pyannote")
+meeting_configure("whisper.model", "small")
+meeting_configure("whisper.language", "fr")
+meeting_configure("diarization.enabled", "true")
 ```
 
 ## Usage
 
 ### Reunion simple (1v1)
 ```
-record_start()
+meeting_record_start()
 # ... reunion ...
-record_and_transcribe(remote_speakers="Bruno", local_speakers="Delanoe")
+meeting_stop_and_transcribe(remote_speakers="Bruno", local_speakers="Delanoe")
 ```
 
 ### Reunion multi-participants
 ```
-record_start()
+meeting_record_start()
 # ... reunion avec plusieurs personnes ...
-record_and_transcribe(remote_speakers="Bruno, Alice, Charlie", local_speakers="Delanoe")
+meeting_stop_and_transcribe(remote_speakers="Bruno, Alice, Charlie", local_speakers="Delanoe")
 # → pyannote identifie les voix par canal
 # → Claude attribue les vrais noms dans le PV
 ```
@@ -117,35 +118,44 @@ record_and_transcribe(remote_speakers="Bruno, Alice, Charlie", local_speakers="D
 ### Generation de PV
 ```
 generate_meeting_pv(meeting_id="2026-04-14_14h00_meeting", participants="Bruno, Alice, Delanoe")
-# → Claude genere le PV structure avec les vrais noms
+# → Claude genere le PV structure dans la langue de la transcription
 ```
 
-## Tools MCP disponibles
+## Tools MCP (13)
 
 | Tool | Description |
 |------|-------------|
-| `check_status` | Statut du serveur (plateforme, backends, modele) |
-| `record_start` | Demarrer l'enregistrement |
-| `record_stop` | Arreter l'enregistrement |
-| `transcribe` | Transcrire un fichier WAV avec speakers par reunion |
-| `record_and_transcribe` | Stop + transcription en un seul appel |
+| `meeting_status` | Statut serveur (plateforme, backends, modele, diarization) |
+| `meeting_record_start` | Demarrer l'enregistrement stereo |
+| `meeting_record_stop` | Arreter l'enregistrement |
+| `meeting_transcribe` | Transcrire un fichier WAV avec speakers par reunion |
+| `meeting_stop_and_transcribe` | Stop + transcription en un seul appel |
 | `get_transcription` | Recuperer une transcription passee |
-| `generate_meeting_pv` | Generer un PV via MCP Sampling |
 | `get_pv` | Recuperer un PV genere |
 | `recordings_list` | Lister les enregistrements |
 | `transcriptions_list` | Lister les transcriptions |
 | `pvs_list` | Lister les PV de reunion |
-| `configure` | Modifier la configuration |
-| `cleanup` | Supprimer les enregistrements > 30 jours |
+| `generate_meeting_pv` | Generer un PV via MCP Sampling |
+| `meeting_configure` | Modifier la configuration |
+| `meeting_cleanup` | Supprimer les enregistrements > 30 jours |
 
 ## MCP Resources et Prompts
 
 | Type | URI / Nom | Description |
 |------|-----------|-------------|
-| Resource | `transcription://{meeting_id}` | Transcription brute |
-| Resource | `pv://{meeting_id}` | PV genere |
+| Resource | `transcription://{meeting_id}` | Transcription brute JSON |
+| Resource | `pv://{meeting_id}` | PV genere en markdown |
 | Prompt | `regenerate_pv` | Regenerer un PV avec instructions custom |
 | Prompt | `extract_action_items` | Extraire les actions d'une reunion |
+
+## Securite
+
+- Local par defaut — aucune donnee envoyee au cloud
+- Mode remote opt-in avec API choisie par l'utilisateur
+- Credentials via env vars uniquement (`HF_TOKEN`, `WHISPER_API_KEY`)
+- Validation meeting_id contre path traversal
+- Thread-safe (threading.Lock sur le recorder)
+- .gitignore couvre .env, recordings, transcriptions, PV
 
 ## Licence
 
