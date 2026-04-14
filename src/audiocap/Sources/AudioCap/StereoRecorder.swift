@@ -25,6 +25,9 @@ final class StereoRecorder {
     // Format
     private let sampleRate: Double
     private let systemChannels: Int
+    private let micSampleRate: Double       // native mic rate (may differ from system)
+    private let resampleRatio: Double       // micSampleRate / sampleRate
+    private var resamplePhase: Double = 0.0 // fractional position in mic buffer
 
     // Audio processing chain: normalize → compress → limit
     // Normalization: running RMS per channel, gain to target level
@@ -65,20 +68,14 @@ final class StereoRecorder {
         self.attackCoeff = expf(-1.0 / (Float(sampleRate) * 0.005))
         self.releaseCoeff = expf(-1.0 / (Float(sampleRate) * 0.100))
 
-        // Find default input device and match sample rate to system
+        // Find default input device
         self.micDeviceID = try StereoRecorder.getDefaultInputDevice()
-        let micSR = StereoRecorder.getDeviceSampleRate(micDeviceID) ?? 0
+        self.micSampleRate = StereoRecorder.getDeviceSampleRate(micDeviceID) ?? sampleRate
+        self.resampleRatio = micSampleRate / sampleRate  // e.g. 44100/48000 = 0.91875
         fputs("audiocap: System: \(sampleRate) Hz, \(systemChannels) ch\n", stderr)
-        fputs("audiocap: Mic device: \(micDeviceID), native \(micSR) Hz\n", stderr)
-
-        if micSR != sampleRate {
-            let set = StereoRecorder.setDeviceSampleRate(micDeviceID, rate: sampleRate)
-            if set {
-                let newSR = StereoRecorder.getDeviceSampleRate(micDeviceID) ?? 0
-                fputs("audiocap: Mic resampled to \(newSR) Hz\n", stderr)
-            } else {
-                fputs("audiocap: WARNING: Could not set mic to \(sampleRate) Hz, audio may drift\n", stderr)
-            }
+        fputs("audiocap: Mic device: \(micDeviceID), \(micSampleRate) Hz\n", stderr)
+        if resampleRatio != 1.0 {
+            fputs("audiocap: Mic resample ratio: \(resampleRatio) (software interpolation)\n", stderr)
         }
 
         // Create WAV: stereo 16-bit at tap sample rate
@@ -233,15 +230,17 @@ final class StereoRecorder {
 
             let frameCount = sysRead / sysBytesPerFrame
 
-            // Read matching amount of mic data (best effort — may have less)
-            let wantMicBytes = frameCount * micBytesPerSample
-            let micRead = micRing.readBytes(micBuffer, count: wantMicBytes)
-            let micFrames = micRead / micBytesPerSample
+            // Read mic data: we need frameCount * resampleRatio mic samples
+            let wantMicSamples = Int(ceil(Double(frameCount) * resampleRatio)) + 2  // +2 for interpolation margin
+            let wantMicBytes = wantMicSamples * micBytesPerSample
+            let actualMicBytes = min(wantMicBytes, maxMicBytes)
+            let micRead = micRing.readBytes(micBuffer, count: actualMicBytes)
+            let micSamples = micRead / micBytesPerSample
 
             let sysPtr = sysBuffer.assumingMemoryBound(to: Float32.self)
             let micPtr = micBuffer.assumingMemoryBound(to: Float32.self)
 
-            // Write stereo: L = system (mono mixdown), R = mic
+            // Write stereo: L = system (mono mixdown), R = mic (resampled)
             guard let pcmBuffer = AVAudioPCMBuffer(
                 pcmFormat: audioFile.processingFormat,
                 frameCapacity: AVAudioFrameCount(frameCount)
@@ -253,11 +252,12 @@ final class StereoRecorder {
             let leftCh = channelData[0]
             let rightCh = channelData[1]
 
-            // === Step 1: Extract raw samples ===
+            // === Step 1: Extract raw samples + resample mic ===
             var sysSum: Float = 0.0
             var micSum: Float = 0.0
 
             for f in 0..<frameCount {
+                // Left: system audio
                 let sysVal: Float
                 if systemChannels >= 2 {
                     sysVal = (sysPtr[f * systemChannels] + sysPtr[f * systemChannels + 1]) * 0.5
@@ -267,14 +267,33 @@ final class StereoRecorder {
                 leftCh[f] = sysVal
                 sysSum += sysVal * sysVal
 
-                let micVal: Float = f < micFrames ? micPtr[f] : 0.0
+                // Right: mic with linear interpolation resampling
+                let micVal: Float
+                if micSamples > 0 {
+                    let idx = Int(resamplePhase)
+                    let frac = Float(resamplePhase - Double(idx))
+                    if idx + 1 < micSamples {
+                        micVal = micPtr[idx] * (1.0 - frac) + micPtr[idx + 1] * frac
+                    } else if idx < micSamples {
+                        micVal = micPtr[idx]
+                    } else {
+                        micVal = 0.0
+                    }
+                    resamplePhase += resampleRatio
+                } else {
+                    micVal = 0.0
+                }
                 rightCh[f] = micVal
                 micSum += micVal * micVal
             }
 
+            // Keep fractional phase, subtract consumed integer samples
+            let consumed = Int(resamplePhase)
+            resamplePhase -= Double(consumed)
+
             // === Step 2: Normalize — bring both channels to target RMS ===
             let chunkSysRMS = sqrtf(sysSum / Float(max(frameCount, 1)))
-            let chunkMicRMS = sqrtf(micSum / Float(max(micFrames, 1)))
+            let chunkMicRMS = sqrtf(micSum / Float(max(frameCount, 1)))
             systemRMS += (chunkSysRMS - systemRMS) * rmsSmoothing
             micRMS += (chunkMicRMS - micRMS) * rmsSmoothing
 
@@ -363,19 +382,5 @@ final class StereoRecorder {
         )
         let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate)
         return status == noErr ? rate : nil
-    }
-
-    /// Set the nominal sample rate on a device. Core Audio HAL handles resampling internally.
-    @discardableResult
-    private static func setDeviceSampleRate(_ deviceID: AudioObjectID, rate: Double) -> Bool {
-        var newRate: Float64 = rate
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let size = UInt32(MemoryLayout<Float64>.size)
-        let status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &newRate)
-        return status == noErr
     }
 }
