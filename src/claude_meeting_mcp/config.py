@@ -45,7 +45,7 @@ class WhisperRemoteConfig:
 @dataclass
 class WhisperConfig:
     model: str = "large-v3-turbo"
-    language: str = "fr"
+    language: str = "en"
     mode: str = "local"
     remote: WhisperRemoteConfig = field(default_factory=WhisperRemoteConfig)
 

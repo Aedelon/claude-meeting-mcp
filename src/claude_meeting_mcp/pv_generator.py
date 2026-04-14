@@ -137,12 +137,12 @@ async def generate_pv_direct(
     known_info = ""
     if known_participants:
         names = ", ".join(known_participants)
-        known_info = f"Participants connus (a identifier): {names}\n"
+        known_info = f"Known participants (to identify): {names}\n"
 
     metadata = (
         f"Date: {transcription.date}\n"
-        f"Duree: {transcription.duration_seconds / 60:.0f} minutes\n"
-        f"Labels dans la transcription: {participants_info}\n"
+        f"Duration: {transcription.duration_seconds / 60:.0f} minutes\n"
+        f"Speaker labels in transcription: {participants_info}\n"
         f"{known_info}\n"
     )
 
@@ -163,7 +163,7 @@ async def generate_pv_map_reduce(
 
     known_info = ""
     if known_participants:
-        known_info = f"\nParticipants connus: {', '.join(known_participants)}\n"
+        known_info = f"\nKnown participants: {', '.join(known_participants)}\n"
 
     # Map: summarize each chunk
     partial_summaries = []
@@ -175,26 +175,26 @@ async def generate_pv_map_reduce(
         summary = await _call_sampling(
             ctx,
             user_text=(
-                f"Bloc {i + 1}/{len(chunks)} ({start_time} - {end_time}):{known_info}\n{chunk_text}"
+                f"Part {i + 1}/{len(chunks)} ({start_time} - {end_time}):{known_info}\n{chunk_text}"
             ),
             system_prompt=CHUNK_SUMMARY_PROMPT,
             max_tokens=2048,
         )
-        partial_summaries.append(f"## Bloc {i + 1} ({start_time} - {end_time})\n{summary}")
+        partial_summaries.append(f"## Part {i + 1} ({start_time} - {end_time})\n{summary}")
 
     # Reduce: synthesize all summaries into final PV
     all_summaries = "\n\n".join(partial_summaries)
     participants_info = ", ".join(transcription.speakers.values())
     metadata = (
         f"Date: {transcription.date}\n"
-        f"Duree: {transcription.duration_seconds / 60:.0f} minutes\n"
-        f"Labels: {participants_info}\n"
+        f"Duration: {transcription.duration_seconds / 60:.0f} minutes\n"
+        f"Speaker labels: {participants_info}\n"
         f"{known_info}\n"
     )
 
     return await _call_sampling(
         ctx,
-        user_text=metadata + "Resumes partiels:\n\n" + all_summaries,
+        user_text=metadata + "Partial summaries:\n\n" + all_summaries,
         system_prompt=SYNTHESIS_PROMPT,
     )
 

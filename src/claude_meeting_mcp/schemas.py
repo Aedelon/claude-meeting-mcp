@@ -20,9 +20,7 @@ class Transcription:
     meeting_id: str
     date: str
     duration_seconds: float
-    speakers: dict[str, str] = field(
-        default_factory=lambda: {"left": "Interlocuteur", "right": "Delanoe"}
-    )
+    speakers: dict[str, str] = field(default_factory=lambda: {"left": "Remote", "right": "Local"})
     segments: list[Segment] = field(default_factory=list)
 
     def to_dict(self) -> dict:
