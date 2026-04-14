@@ -368,30 +368,76 @@ async def audio_generate_pv(
 @mcp.tool()
 def audio_configure(
     key: Annotated[
-        str,
+        str | None,
         Field(
             description=(
-                "Config key to modify. "
-                "Options: transcription.model, transcription.mode, transcription.language, "
-                "diarization.enabled, diarization.backend, recording.sample_rate, "
-                "pv.auto_generate, transcription.remote.url, transcription.remote.api_key_env"
+                "Config key to modify. Empty = show config menu. "
+                "Keys: transcription.model, transcription.mode, "
+                "transcription.language, diarization.enabled, pv.auto_generate"
             )
         ),
-    ],
-    value: Annotated[str, Field(description="New value for the config key")],
+    ] = None,
+    value: Annotated[str | None, Field(description="New value for the config key")] = None,
 ) -> dict:
-    """Use this when user wants to change settings (language, model, quality, etc.).
+    """Use this when user wants to change settings or see current configuration.
 
-    GUIDED WIZARD: Walk user through settings one at a time, ask one question,
-    apply with this tool, confirm, then ask "next setting or done?"
-    1. Language → transcription.language (fr, en, es, de, ja...)
-    2. Quality → transcription.model: fast=medium, balanced=large-v3-turbo, best=large-v3
-    3. Multi-speaker → diarization.enabled=true + diarization.backend (pyannote/whisperx)
-    4. Auto-PV → pv.auto_generate (true/false)
-    5. Local/remote → transcription.mode. NEVER ask API keys in chat — tell user
-       to set TRANSCRIPTION_API_KEY/HF_TOKEN in env or Claude Desktop config.
-    Show summary at end.
+    Call WITHOUT parameters to show the configuration menu with current values.
+    Call WITH key+value to change a specific setting.
+
+    Walk user through settings one at a time (wizard), ask one question,
+    apply, confirm, then ask "next setting or done?" Show summary at end.
+    NEVER ask API keys in chat — tell user to set env vars.
     """
+    # No key = show config menu
+    if not key:
+        config = get_config()
+        return {
+            "current_config": {
+                "language": config.transcription.language,
+                "model": config.transcription.model,
+                "mode": config.transcription.mode,
+                "diarization": config.diarization.enabled,
+                "diarization_backend": config.diarization.backend,
+                "auto_pv": config.pv.auto_generate,
+            },
+            "available_settings": [
+                {
+                    "key": "transcription.language",
+                    "description": "Meeting language",
+                    "examples": "en, fr, es, de, ja, zh, ar...",
+                },
+                {
+                    "key": "transcription.model",
+                    "description": "Transcription quality",
+                    "options": "fast=medium, balanced=large-v3-turbo (default), best=large-v3",
+                },
+                {
+                    "key": "diarization.enabled",
+                    "description": "Multi-speaker identification",
+                    "options": "true / false",
+                },
+                {
+                    "key": "diarization.backend",
+                    "description": "Diarization engine",
+                    "options": "pyannote / whisperx / none",
+                },
+                {
+                    "key": "pv.auto_generate",
+                    "description": "Auto-generate meeting minutes after transcription",
+                    "options": "true / false",
+                },
+                {
+                    "key": "transcription.mode",
+                    "description": "Local (on device) or remote (API)",
+                    "options": "local / remote",
+                },
+            ],
+            "hint": "Ask which setting to change, or walk through all of them.",
+        }
+
+    if not value:
+        return {"error": "Please provide both key and value. Call without params to see the menu."}
+
     try:
         config = update_config(key, value)
         errors = validate_config(config)
