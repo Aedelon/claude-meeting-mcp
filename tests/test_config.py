@@ -20,9 +20,9 @@ from claude_meeting_mcp.config import (
 
 def test_default_config():
     config = Config()
-    assert config.whisper.model == "large-v3-turbo"
-    assert config.whisper.language == "en"
-    assert config.whisper.mode == "local"
+    assert config.transcription.model == "large-v3-turbo"
+    assert config.transcription.language == "en"
+    assert config.transcription.mode == "local"
     assert config.recording.sample_rate == 48000
     assert config.diarization.enabled is False
     assert config.diarization.backend == "none"
@@ -31,24 +31,24 @@ def test_default_config():
 
 def test_apply_toml_partial():
     config = Config()
-    data = {"whisper": {"model": "small", "language": "en"}}
+    data = {"transcription": {"model": "small", "language": "en"}}
     _apply_toml_to_config(config, data)
-    assert config.whisper.model == "small"
-    assert config.whisper.language == "en"
-    assert config.whisper.mode == "local"
+    assert config.transcription.model == "small"
+    assert config.transcription.language == "en"
+    assert config.transcription.mode == "local"
 
 
 def test_apply_toml_remote():
     config = Config()
     data = {
-        "whisper": {
+        "transcription": {
             "mode": "remote",
             "remote": {"url": "https://api.example.com/v1/audio/transcriptions"},
         }
     }
     _apply_toml_to_config(config, data)
-    assert config.whisper.mode == "remote"
-    assert config.whisper.remote.url == "https://api.example.com/v1/audio/transcriptions"
+    assert config.transcription.mode == "remote"
+    assert config.transcription.remote.url == "https://api.example.com/v1/audio/transcriptions"
 
 
 def test_apply_toml_recording():
@@ -81,23 +81,23 @@ def test_validate_config_valid():
 
 def test_validate_invalid_model():
     config = Config()
-    config.whisper.model = "nonexistent"
+    config.transcription.model = "nonexistent"
     errors = validate_config(config)
     assert len(errors) == 1
-    assert "Invalid whisper model" in errors[0]
+    assert "Invalid transcription model" in errors[0]
 
 
 def test_validate_invalid_mode():
     config = Config()
-    config.whisper.mode = "cloud"
+    config.transcription.mode = "cloud"
     errors = validate_config(config)
-    assert any("Invalid whisper mode" in e for e in errors)
+    assert any("Invalid transcription mode" in e for e in errors)
 
 
 def test_validate_remote_without_url():
     config = Config()
-    config.whisper.mode = "remote"
-    config.whisper.remote.url = ""
+    config.transcription.mode = "remote"
+    config.transcription.remote.url = ""
     errors = validate_config(config)
     assert any("remote.url" in e.lower() or "Remote mode" in e for e in errors)
 
@@ -138,9 +138,9 @@ def test_save_and_load_config(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
 
     config = Config()
-    config.whisper.model = "medium"
-    config.whisper.mode = "remote"
-    config.whisper.remote.url = "https://example.com/transcribe"
+    config.transcription.model = "medium"
+    config.transcription.mode = "remote"
+    config.transcription.remote.url = "https://example.com/transcribe"
     config.diarization.enabled = True
     config.diarization.backend = "whisperx"
     config.pv.auto_generate = False
@@ -148,9 +148,9 @@ def test_save_and_load_config(monkeypatch, tmp_path):
     save_config(config)
 
     loaded = load_config()
-    assert loaded.whisper.model == "medium"
-    assert loaded.whisper.mode == "remote"
-    assert loaded.whisper.remote.url == "https://example.com/transcribe"
+    assert loaded.transcription.model == "medium"
+    assert loaded.transcription.mode == "remote"
+    assert loaded.transcription.remote.url == "https://example.com/transcribe"
     assert loaded.diarization.enabled is True
     assert loaded.diarization.backend == "whisperx"
     assert loaded.pv.auto_generate is False
@@ -159,26 +159,26 @@ def test_save_and_load_config(monkeypatch, tmp_path):
 def test_load_config_missing_file(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
     config = load_config()
-    assert config.whisper.model == "large-v3-turbo"
+    assert config.transcription.model == "large-v3-turbo"
 
 
-def test_update_config_whisper_model(monkeypatch, tmp_path):
+def test_update_config_transcription_model(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
     reload_config()
 
-    updated = update_config("whisper.model", "small")
-    assert updated.whisper.model == "small"
+    updated = update_config("transcription.model", "small")
+    assert updated.transcription.model == "small"
 
     loaded = load_config()
-    assert loaded.whisper.model == "small"
+    assert loaded.transcription.model == "small"
 
 
 def test_update_config_remote_url(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
     reload_config()
 
-    updated = update_config("whisper.remote.url", "https://api.test.com/v1")
-    assert updated.whisper.remote.url == "https://api.test.com/v1"
+    updated = update_config("transcription.remote.url", "https://api.test.com/v1")
+    assert updated.transcription.remote.url == "https://api.test.com/v1"
 
 
 def test_update_config_invalid_key(monkeypatch, tmp_path):

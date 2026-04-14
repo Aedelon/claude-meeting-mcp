@@ -22,7 +22,7 @@ def test_meeting_status_keys():
         assert "audio_capture_available" in result
         assert "audio_capture_backend" in result
         assert "transcription_backend" in result
-        assert "whisper_model" in result
+        assert "transcription_model" in result
         assert "currently_recording" in result
         assert result["platform"] == sys.platform
         assert result["transcription_backend"] == "mlx"

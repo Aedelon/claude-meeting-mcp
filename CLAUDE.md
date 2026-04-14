@@ -57,14 +57,14 @@ PV de reunion .md             → Genere automatiquement via MCP Sampling
 Fichier : `~/.config/claude-meeting-mcp/config.toml` (Linux), `~/Library/Application Support/` (macOS), `%APPDATA%` (Windows)
 
 ```toml
-[whisper]
+[transcription]
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3-turbo, large-v3
 language = "en"             # configurable par langue de reunion
 mode = "local"              # "local" ou "remote"
 
-[whisper.remote]
-url = ""                    # API compatible OpenAI /v1/audio/transcriptions
-api_key_env = "WHISPER_API_KEY"
+[transcription.remote]
+url = ""                    # Any OpenAI-compatible /v1/audio/transcriptions API
+api_key_env = "TRANSCRIPTION_API_KEY"
 
 [recording]
 sample_rate = 48000
@@ -197,7 +197,7 @@ scripts/
 - Par defaut, jamais d'envoi de donnees audio vers un service cloud (mode "local")
 - Le mode "remote" est opt-in et utilise une API choisie par l'utilisateur
 - Tout le traitement local utilise Whisper sur le hardware de l'utilisateur
-- Credentials uniquement via env vars (HF_TOKEN, WHISPER_API_KEY) — jamais hardcodes
+- Credentials uniquement via env vars (HF_TOKEN, TRANSCRIPTION_API_KEY) — jamais hardcodes
 - Validation meeting_id contre path traversal (rejet ../ et separateurs)
 - recorder.py protege par threading.Lock (pas de race condition)
 - .gitignore couvre .env, recordings, transcriptions, PV

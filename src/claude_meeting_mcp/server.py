@@ -86,9 +86,9 @@ def meeting_status() -> dict:
         "audio_capture_available": capturer.is_available(),
         "audio_capture_backend": type(capturer).__name__,
         "transcription_backend": _get_backend(),
-        "whisper_model": config.whisper.model,
-        "whisper_mode": config.whisper.mode,
-        "whisper_language": config.whisper.language,
+        "transcription_model": config.transcription.model,
+        "transcription_mode": config.transcription.mode,
+        "transcription_language": config.transcription.language,
         "diarization_enabled": config.diarization.enabled,
         "currently_recording": is_recording(),
         "disk_free_gb": disk_free_gb,
@@ -145,7 +145,9 @@ def meeting_transcribe(
     ] = None,
     model: Annotated[
         str | None,
-        Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
+        Field(
+            description="Transcription model: tiny, base, small, medium, large-v3-turbo, large-v3"
+        ),
     ] = None,
 ) -> dict:
     """Transcribe an existing meeting WAV file.
@@ -182,7 +184,9 @@ def meeting_stop_and_transcribe(
     ] = None,
     model: Annotated[
         str | None,
-        Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
+        Field(
+            description="Transcription model: tiny, base, small, medium, large-v3-turbo, large-v3"
+        ),
     ] = None,
 ) -> dict:
     """Stop the recording and transcribe it in one step.
@@ -318,9 +322,9 @@ def meeting_configure(
         Field(
             description=(
                 "Config key to modify. "
-                "Options: whisper.model, whisper.mode, whisper.language, "
+                "Options: transcription.model, transcription.mode, transcription.language, "
                 "diarization.enabled, diarization.backend, recording.sample_rate, "
-                "pv.auto_generate, whisper.remote.url, whisper.remote.api_key_env"
+                "pv.auto_generate, transcription.remote.url, transcription.remote.api_key_env"
             )
         ),
     ],
@@ -329,9 +333,10 @@ def meeting_configure(
     """Modify a claude-meeting-mcp configuration parameter.
 
     Common operations:
-    - Change Whisper model: key='whisper.model', value='small'
+    - Change transcription model: key='transcription.model', value='small'
     - Enable diarization: key='diarization.enabled', value='true'
-    - Switch to remote: key='whisper.mode', value='remote'
+    - Switch to remote API: key='transcription.mode', value='remote'
+    - Set remote API URL: key='transcription.remote.url', value='https://api.groq.com/...'
     """
     try:
         config = update_config(key, value)

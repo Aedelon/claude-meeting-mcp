@@ -27,7 +27,7 @@ def _get_backend(mode_override: str | None = None) -> str:
     Returns: 'remote', 'mlx', or 'faster'
     """
     config = get_config()
-    mode = mode_override or config.whisper.mode
+    mode = mode_override or config.transcription.mode
 
     if mode == "remote":
         return "remote"
@@ -59,8 +59,8 @@ def _transcribe_mlx(audio: np.ndarray, samplerate: int, model: str | None = None
     import mlx_whisper
 
     config = get_config()
-    model_id = get_mlx_model_id(model or config.whisper.model)
-    language = config.whisper.language
+    model_id = get_mlx_model_id(model or config.transcription.model)
+    language = config.transcription.language
 
     audio = audio.astype(np.float32, copy=False)
     result = mlx_whisper.transcribe(
@@ -78,8 +78,8 @@ def _transcribe_faster(audio: np.ndarray, samplerate: int, model: str | None = N
     from faster_whisper import WhisperModel
 
     config = get_config()
-    model_id = get_faster_model_id(model or config.whisper.model)
-    language = config.whisper.language
+    model_id = get_faster_model_id(model or config.transcription.model)
+    language = config.transcription.language
 
     # Cache model singleton (reload if model changed)
     if _faster_model is None or _faster_model_name != model_id:
@@ -108,11 +108,11 @@ def _transcribe_remote_channel(wav_path: str, channel: str = "left") -> list[dic
     import httpx
 
     config = get_config()
-    url = config.whisper.remote.url
-    api_key = os.environ.get(config.whisper.remote.api_key_env, "")
+    url = config.transcription.remote.url
+    api_key = os.environ.get(config.transcription.remote.api_key_env, "")
 
     if not url:
-        raise RuntimeError("Remote transcription URL not configured. Set whisper.remote.url")
+        raise RuntimeError("Remote transcription URL not configured. Set transcription.remote.url")
 
     headers = {}
     if api_key:
@@ -124,8 +124,8 @@ def _transcribe_remote_channel(wav_path: str, channel: str = "left") -> list[dic
             headers=headers,
             files={"file": (f"audio_{channel}.wav", f, "audio/wav")},
             data={
-                "model": config.whisper.model,
-                "language": config.whisper.language,
+                "model": config.transcription.model,
+                "language": config.transcription.language,
                 "response_format": "verbose_json",
             },
             timeout=300.0,
@@ -165,7 +165,7 @@ def _ensure_faster_model() -> None:
     from faster_whisper import WhisperModel
 
     config = get_config()
-    model_id = get_faster_model_id(config.whisper.model)
+    model_id = get_faster_model_id(config.transcription.model)
     _faster_model = WhisperModel(model_id, device="auto", compute_type="auto")
     _faster_model_name = model_id
     logger.info("Faster-whisper model loaded: %s", model_id)

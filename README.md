@@ -70,14 +70,14 @@ Ajouter dans la config MCP :
 Fichier de configuration : `~/.config/claude-meeting-mcp/config.toml`
 
 ```toml
-[whisper]
+[transcription]
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3-turbo, large-v3
 language = "en"             # langue de la reunion
 mode = "local"              # "local" ou "remote"
 
-[whisper.remote]
-url = ""                    # URL API compatible OpenAI Whisper
-api_key_env = "WHISPER_API_KEY"
+[transcription.remote]
+url = ""                    # Any OpenAI-compatible /v1/audio/transcriptions API
+api_key_env = "TRANSCRIPTION_API_KEY"
 
 [recording]
 sample_rate = 48000
@@ -92,8 +92,8 @@ auto_generate = true
 
 Ou via les tools MCP :
 ```
-meeting_configure("whisper.model", "small")
-meeting_configure("whisper.language", "fr")
+meeting_configure("transcription.model", "small")
+meeting_configure("transcription.language", "fr")
 meeting_configure("diarization.enabled", "true")
 ```
 
@@ -152,7 +152,7 @@ generate_meeting_pv(meeting_id="2026-04-14_14h00_meeting", participants="Bruno, 
 
 - Local par defaut — aucune donnee envoyee au cloud
 - Mode remote opt-in avec API choisie par l'utilisateur
-- Credentials via env vars uniquement (`HF_TOKEN`, `WHISPER_API_KEY`)
+- Credentials via env vars uniquement (`HF_TOKEN`, `TRANSCRIPTION_API_KEY`)
 - Validation meeting_id contre path traversal
 - Thread-safe (threading.Lock sur le recorder)
 - .gitignore couvre .env, recordings, transcriptions, PV

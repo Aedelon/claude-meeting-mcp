@@ -37,17 +37,21 @@ VALID_DIARIZATION_BACKENDS = {"none", "whisperx", "pyannote"}
 
 
 @dataclass
-class WhisperRemoteConfig:
+class TranscriptionRemoteConfig:
+    """Remote transcription API (any OpenAI-compatible /v1/audio/transcriptions endpoint)."""
+
     url: str = ""
-    api_key_env: str = "WHISPER_API_KEY"
+    api_key_env: str = "TRANSCRIPTION_API_KEY"
 
 
 @dataclass
-class WhisperConfig:
+class TranscriptionConfig:
+    """Transcription settings. Local uses Whisper (mlx/faster), remote uses any compatible API."""
+
     model: str = "large-v3-turbo"
     language: str = "en"
-    mode: str = "local"
-    remote: WhisperRemoteConfig = field(default_factory=WhisperRemoteConfig)
+    mode: str = "local"  # "local" (Whisper on device) or "remote" (API)
+    remote: TranscriptionRemoteConfig = field(default_factory=TranscriptionRemoteConfig)
 
 
 @dataclass
@@ -68,7 +72,7 @@ class PVConfig:
 
 @dataclass
 class Config:
-    whisper: WhisperConfig = field(default_factory=WhisperConfig)
+    transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     pv: PVConfig = field(default_factory=PVConfig)
@@ -89,20 +93,20 @@ def get_config_path() -> Path:
 
 def _apply_toml_to_config(config: Config, data: dict[str, Any]) -> None:
     """Apply parsed TOML data onto a Config instance."""
-    if "whisper" in data:
-        w = data["whisper"]
+    if "transcription" in data:
+        w = data["transcription"]
         if "model" in w:
-            config.whisper.model = str(w["model"])
+            config.transcription.model = str(w["model"])
         if "language" in w:
-            config.whisper.language = str(w["language"])
+            config.transcription.language = str(w["language"])
         if "mode" in w:
-            config.whisper.mode = str(w["mode"])
+            config.transcription.mode = str(w["mode"])
         if "remote" in w:
             r = w["remote"]
             if "url" in r:
-                config.whisper.remote.url = str(r["url"])
+                config.transcription.remote.url = str(r["url"])
             if "api_key_env" in r:
-                config.whisper.remote.api_key_env = str(r["api_key_env"])
+                config.transcription.remote.api_key_env = str(r["api_key_env"])
 
     if "recording" in data:
         rec = data["recording"]
@@ -125,17 +129,18 @@ def _apply_toml_to_config(config: Config, data: dict[str, Any]) -> None:
 def validate_config(config: Config) -> list[str]:
     """Validate config values. Returns list of error messages (empty = valid)."""
     errors: list[str] = []
-    if config.whisper.model not in VALID_MODELS:
+    if config.transcription.model not in VALID_MODELS:
         errors.append(
-            f"Invalid whisper model '{config.whisper.model}'. "
+            f"Invalid transcription model '{config.transcription.model}'. "
             f"Valid: {', '.join(sorted(VALID_MODELS))}"
         )
-    if config.whisper.mode not in VALID_MODES:
+    if config.transcription.mode not in VALID_MODES:
         errors.append(
-            f"Invalid whisper mode '{config.whisper.mode}'. Valid: {', '.join(VALID_MODES)}"
+            f"Invalid transcription mode '{config.transcription.mode}'. "
+            f"Valid: {', '.join(VALID_MODES)}"
         )
-    if config.whisper.mode == "remote" and not config.whisper.remote.url:
-        errors.append("Remote mode requires whisper.remote.url to be set")
+    if config.transcription.mode == "remote" and not config.transcription.remote.url:
+        errors.append("Remote mode requires transcription.remote.url to be set")
     if config.recording.sample_rate not in (16000, 22050, 44100, 48000):
         errors.append(
             f"Unusual sample rate {config.recording.sample_rate}. "
@@ -169,14 +174,14 @@ def save_config(config: Config) -> Path:
     config_path = config_dir / "config.toml"
 
     lines = [
-        "[whisper]",
-        f'model = "{config.whisper.model}"',
-        f'language = "{config.whisper.language}"',
-        f'mode = "{config.whisper.mode}"',
+        "[transcription]",
+        f'model = "{config.transcription.model}"',
+        f'language = "{config.transcription.language}"',
+        f'mode = "{config.transcription.mode}"',
         "",
-        "[whisper.remote]",
-        f'url = "{config.whisper.remote.url}"',
-        f'api_key_env = "{config.whisper.remote.api_key_env}"',
+        "[transcription.remote]",
+        f'url = "{config.transcription.remote.url}"',
+        f'api_key_env = "{config.transcription.remote.api_key_env}"',
         "",
         "[recording]",
         f"sample_rate = {config.recording.sample_rate}",
@@ -227,7 +232,7 @@ def update_config(key: str, value: str) -> Config:
     """Update a single config key and save to disk.
 
     Args:
-        key: Dot-separated key (e.g., 'whisper.model', 'diarization.backend')
+        key: Dot-separated key (e.g., 'transcription.model', 'diarization.backend')
         value: New value as string
     """
     config = get_config()
@@ -235,8 +240,8 @@ def update_config(key: str, value: str) -> Config:
     parts = key.split(".")
     if len(parts) == 2:
         section, field_name = parts
-        if section == "whisper" and field_name in ("model", "language", "mode"):
-            setattr(config.whisper, field_name, value)
+        if section == "transcription" and field_name in ("model", "language", "mode"):
+            setattr(config.transcription, field_name, value)
         elif section == "recording" and field_name == "sample_rate":
             config.recording.sample_rate = int(value)
         elif section == "diarization" and field_name == "backend":
@@ -247,10 +252,10 @@ def update_config(key: str, value: str) -> Config:
             config.pv.auto_generate = value.lower() in ("true", "1", "yes")
         else:
             raise ValueError(f"Unknown config key: {key}")
-    elif len(parts) == 3 and parts[0] == "whisper" and parts[1] == "remote":
+    elif len(parts) == 3 and parts[0] == "transcription" and parts[1] == "remote":
         field_name = parts[2]
         if field_name in ("url", "api_key_env"):
-            setattr(config.whisper.remote, field_name, value)
+            setattr(config.transcription.remote, field_name, value)
         else:
             raise ValueError(f"Unknown config key: {key}")
     else:
