@@ -10,10 +10,20 @@ CHUNK_DURATION_SECONDS = 1800  # 30 minutes
 SHORT_MEETING_THRESHOLD = 3600  # 1 hour
 
 PV_SYSTEM_PROMPT = """Tu es un assistant specialise dans la redaction de proces-verbaux de reunion.
-A partir de la transcription fournie, genere un PV structure en markdown avec :
+
+IMPORTANT — Resolution des identites :
+La transcription utilise des labels generiques (remote_1, remote_2, local_1, etc.).
+Une liste de participants connus est fournie. Tu DOIS identifier qui est qui en te basant sur :
+- Le contenu de ce que chaque speaker dit (role, sujet, expertise)
+- Le contexte de la reunion
+- Les indices dans la conversation (quand quelqu'un s'adresse a un autre par son nom)
+Remplace les labels generiques par les vrais noms dans le PV.
+Si tu ne peux pas identifier un speaker, garde le label generique.
+
+Genere un PV structure en markdown avec :
 - **Date** et **Duree**
-- **Participants** (extraits des speakers)
-- **Points discutes** (resume par theme, avec attribution au speaker)
+- **Participants** (vrais noms identifies)
+- **Points discutes** (resume par theme, avec attribution au vrai nom du speaker)
 - **Decisions prises** (liste numerotee)
 - **Actions a suivre** (qui, quoi, deadline si mentionnee)
 Sois factuel, concis, et preserve les nuances importantes.
@@ -108,14 +118,25 @@ async def _call_sampling(
     return str(result.content)
 
 
-async def generate_pv_direct(ctx: Context, transcription: Transcription) -> str:
+async def generate_pv_direct(
+    ctx: Context,
+    transcription: Transcription,
+    known_participants: list[str] | None = None,
+) -> str:
     """Generate PV for short meetings (<1h) in a single sampling call."""
     transcript_text = format_transcription_text(transcription)
+
+    participants_info = ", ".join(transcription.speakers.values())
+    known_info = ""
+    if known_participants:
+        names = ", ".join(known_participants)
+        known_info = f"Participants connus (a identifier): {names}\n"
 
     metadata = (
         f"Date: {transcription.date}\n"
         f"Duree: {transcription.duration_seconds / 60:.0f} minutes\n"
-        f"Participants: {', '.join(transcription.speakers.values())}\n\n"
+        f"Labels dans la transcription: {participants_info}\n"
+        f"{known_info}\n"
     )
 
     return await _call_sampling(
@@ -125,9 +146,17 @@ async def generate_pv_direct(ctx: Context, transcription: Transcription) -> str:
     )
 
 
-async def generate_pv_map_reduce(ctx: Context, transcription: Transcription) -> str:
+async def generate_pv_map_reduce(
+    ctx: Context,
+    transcription: Transcription,
+    known_participants: list[str] | None = None,
+) -> str:
     """Generate PV for long meetings (>=1h) using map-reduce strategy."""
     chunks = split_transcription_by_duration(transcription, CHUNK_DURATION_SECONDS)
+
+    known_info = ""
+    if known_participants:
+        known_info = f"\nParticipants connus: {', '.join(known_participants)}\n"
 
     # Map: summarize each chunk
     partial_summaries = []
@@ -138,7 +167,9 @@ async def generate_pv_map_reduce(ctx: Context, transcription: Transcription) -> 
 
         summary = await _call_sampling(
             ctx,
-            user_text=f"Bloc {i + 1}/{len(chunks)} ({start_time} - {end_time}):\n\n{chunk_text}",
+            user_text=(
+                f"Bloc {i + 1}/{len(chunks)} ({start_time} - {end_time}):{known_info}\n{chunk_text}"
+            ),
             system_prompt=CHUNK_SUMMARY_PROMPT,
             max_tokens=2048,
         )
@@ -146,10 +177,12 @@ async def generate_pv_map_reduce(ctx: Context, transcription: Transcription) -> 
 
     # Reduce: synthesize all summaries into final PV
     all_summaries = "\n\n".join(partial_summaries)
+    participants_info = ", ".join(transcription.speakers.values())
     metadata = (
         f"Date: {transcription.date}\n"
         f"Duree: {transcription.duration_seconds / 60:.0f} minutes\n"
-        f"Participants: {', '.join(transcription.speakers.values())}\n\n"
+        f"Labels: {participants_info}\n"
+        f"{known_info}\n"
     )
 
     return await _call_sampling(
@@ -159,11 +192,15 @@ async def generate_pv_map_reduce(ctx: Context, transcription: Transcription) -> 
     )
 
 
-async def generate_pv(ctx: Context, transcription: Transcription) -> str:
+async def generate_pv(
+    ctx: Context,
+    transcription: Transcription,
+    known_participants: list[str] | None = None,
+) -> str:
     """Generate PV using the appropriate strategy based on meeting duration."""
     if transcription.duration_seconds < SHORT_MEETING_THRESHOLD:
-        return await generate_pv_direct(ctx, transcription)
-    return await generate_pv_map_reduce(ctx, transcription)
+        return await generate_pv_direct(ctx, transcription, known_participants)
+    return await generate_pv_map_reduce(ctx, transcription, known_participants)
 
 
 def save_pv(meeting_id: str, pv_text: str) -> str:

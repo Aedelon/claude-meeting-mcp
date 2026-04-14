@@ -156,14 +156,19 @@ def cleanup() -> dict:
 
 
 @mcp.tool()
-async def generate_meeting_pv(ctx: Context, meeting_id: str) -> dict:
+async def generate_meeting_pv(
+    ctx: Context,
+    meeting_id: str,
+    participants: str | None = None,
+) -> dict:
     """Generate a meeting minutes (PV) from a transcription using AI.
 
     The PV is generated automatically via MCP Sampling (server asks Claude to summarize).
-    For meetings under 1h: single pass. For longer meetings: map-reduce strategy.
+    Claude identifies who is who based on conversation content and the participant list.
 
     Args:
         meeting_id: The meeting identifier (filename without .json extension)
+        participants: Comma-separated names of known participants (helps Claude identify speakers)
     """
     # Load transcription
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
@@ -179,8 +184,11 @@ async def generate_meeting_pv(ctx: Context, meeting_id: str) -> dict:
             "Generate PV manually by reading the transcription."
         }
 
+    # Parse known participants
+    known = [n.strip() for n in participants.split(",")] if participants else None
+
     # Generate PV
-    pv_text = await generate_pv(ctx, transcription)
+    pv_text = await generate_pv(ctx, transcription, known)
     pv_path = save_pv(meeting_id, pv_text)
 
     return {
