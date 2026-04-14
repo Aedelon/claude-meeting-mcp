@@ -1,61 +1,60 @@
-"""Audio recording via audiocap Swift CLI."""
+"""Audio recording orchestration via platform-specific capture backends."""
 
-import subprocess
-import signal
-import os
-from pathlib import Path
+from .capture import AudioCapturer, get_capturer
 from .storage import RECORDINGS_DIR, ensure_dirs, generate_filename
 
-# Path to compiled audiocap binary
-AUDIOCAP_BIN = Path(__file__).parent.parent / "audiocap" / ".build" / "release" / "audiocap"
-
-_current_process: subprocess.Popen | None = None
+_capturer: AudioCapturer | None = None
 _current_file: str | None = None
 
 
 def is_audiocap_available() -> bool:
-    return AUDIOCAP_BIN.exists()
+    """Check if audio capture is available on this platform."""
+    return get_capturer().is_available()
 
 
 def start_recording() -> dict:
     """Start recording system audio + microphone."""
-    global _current_process, _current_file
+    global _capturer, _current_file
 
-    if _current_process is not None:
+    if _capturer is not None:
         return {"error": "Recording already in progress", "file": _current_file}
 
-    if not is_audiocap_available():
-        return {"error": f"audiocap binary not found at {AUDIOCAP_BIN}. Run: cd src/audiocap && swift build -c release"}
+    capturer = get_capturer()
+    if not capturer.is_available():
+        return {"error": "Audio capture not available on this platform. Check installation."}
 
     ensure_dirs()
     filename = generate_filename()
     filepath = RECORDINGS_DIR / filename
     _current_file = str(filepath)
 
-    _current_process = subprocess.Popen(
-        [str(AUDIOCAP_BIN), "--output", str(filepath)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        capturer.start(_current_file)
+        _capturer = capturer
+    except RuntimeError as e:
+        _current_file = None
+        return {"error": str(e)}
 
-    return {"status": "recording", "file": _current_file, "pid": _current_process.pid}
+    return {"status": "recording", "file": _current_file}
 
 
 def stop_recording() -> dict:
     """Stop current recording."""
-    global _current_process, _current_file
+    global _capturer, _current_file
 
-    if _current_process is None:
+    if _capturer is None:
         return {"error": "No recording in progress"}
 
-    _current_process.send_signal(signal.SIGINT)
-    _current_process.wait(timeout=10)
+    try:
+        _capturer.stop()
+    except RuntimeError as e:
+        return {"error": str(e)}
 
     result = {"status": "stopped", "file": _current_file}
-    _current_process = None
+    _capturer = None
     _current_file = None
     return result
 
 
 def is_recording() -> bool:
-    return _current_process is not None
+    return _capturer is not None
