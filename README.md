@@ -137,18 +137,18 @@ Talk to Claude:
 
 ```
 You: "Record my meeting with Bruno"
-Claude: → calls meeting_record_start()
+Claude: → calls audio_record_start()
         "Recording started. I'll capture system audio and your microphone."
 
 [... your meeting happens ...]
 
 You: "We're done"
-Claude: → calls meeting_stop_and_transcribe(remote_speakers="Bruno", local_speakers="You")
+Claude: → calls audio_stop_and_transcribe(remote_speakers="Bruno", local_speakers="You")
         "Meeting transcribed: 45 minutes, 127 segments.
          Would you like me to generate meeting minutes?"
 
 You: "Yes"
-Claude: → calls generate_meeting_pv(meeting_id="2026-04-15_14h00_meeting", participants="Bruno, You")
+Claude: → calls audio_generate_pv(meeting_id="2026-04-15_14h00_meeting", participants="Bruno, You")
         "Meeting minutes generated and saved."
 ```
 
@@ -158,12 +158,12 @@ Claude: → calls generate_meeting_pv(meeting_id="2026-04-15_14h00_meeting", par
 You: "Start recording. I have a meeting with Bruno, Alice, and Charlie.
       Marc is in the room with me."
 
-Claude: → calls meeting_record_start()
+Claude: → calls audio_record_start()
 
 [... meeting ...]
 
 You: "Stop and transcribe"
-Claude: → calls meeting_stop_and_transcribe(
+Claude: → calls audio_stop_and_transcribe(
            remote_speakers="Bruno, Alice, Charlie",
            local_speakers="You, Marc"
          )
@@ -171,11 +171,25 @@ Claude: → calls meeting_stop_and_transcribe(
 
 With diarization enabled, the system identifies individual voices within each channel.
 
+### Record and transcribe a YouTube video / podcast
+
+```
+You: "Record the audio from this YouTube tutorial"
+Claude: → calls audio_record_start()
+        "Recording started. Play your video — I'm capturing all system audio."
+
+[... watch the video ...]
+
+You: "Done"
+Claude: → calls audio_stop_and_transcribe()
+        "Transcribed: 12 minutes, 45 segments."
+```
+
 ### Transcribe an existing audio file
 
 ```
 You: "Transcribe this file: /Users/me/Downloads/meeting.wav"
-Claude: → calls meeting_transcribe(file_path="/Users/me/Downloads/meeting.wav")
+Claude: → calls audio_transcribe(file_path="/Users/me/Downloads/meeting.wav")
 ```
 
 ### Review past meetings
@@ -188,7 +202,7 @@ Claude: → calls transcriptions_list()
          - 2026-04-14_10h00_meeting (1h 20min)"
 
 You: "Generate minutes for the one from yesterday"
-Claude: → calls generate_meeting_pv(meeting_id="2026-04-14_10h00_meeting")
+Claude: → calls audio_generate_pv(meeting_id="2026-04-14_10h00_meeting")
 ```
 
 ### Extract action items
@@ -206,14 +220,14 @@ Claude: → uses extract_action_items prompt
 
 ```
 You: "Use a smaller transcription model"
-Claude: → calls meeting_configure(key="transcription.model", value="small")
+Claude: → calls audio_configure(key="transcription.model", value="small")
 
 You: "Enable speaker diarization"
-Claude: → calls meeting_configure(key="diarization.enabled", value="true")
+Claude: → calls audio_configure(key="diarization.enabled", value="true")
 
 You: "Switch to Groq for transcription"
-Claude: → calls meeting_configure(key="transcription.mode", value="remote")
-       → calls meeting_configure(key="transcription.remote.url",
+Claude: → calls audio_configure(key="transcription.mode", value="remote")
+       → calls audio_configure(key="transcription.remote.url",
            value="https://api.groq.com/openai/v1/audio/transcriptions")
 ```
 
@@ -305,15 +319,15 @@ Then tell Claude: *"Enable diarization"*
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `meeting_record_start` | Start recording system audio + microphone | None |
-| `meeting_record_stop` | Stop recording and save WAV file | None |
-| `meeting_stop_and_transcribe` | Stop + transcribe in one call (preferred) | `local_speakers`, `remote_speakers`, `model` |
+| `audio_record_start` | Start recording system audio + microphone | None |
+| `audio_record_stop` | Stop recording and save WAV file | None |
+| `audio_stop_and_transcribe` | Stop + transcribe in one call (preferred) | `local_speakers`, `remote_speakers`, `model` |
 
 ### Transcription
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `meeting_transcribe` | Transcribe an existing WAV file | `file_path` (required), `local_speakers`, `remote_speakers`, `model` |
+| `audio_transcribe` | Transcribe an existing WAV file | `file_path` (required), `local_speakers`, `remote_speakers`, `model` |
 | `get_transcription` | Retrieve a past transcription | `meeting_id` |
 | `transcriptions_list` | List all transcriptions | None |
 
@@ -321,7 +335,7 @@ Then tell Claude: *"Enable diarization"*
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `generate_meeting_pv` | Generate minutes from a transcription | `meeting_id` (required), `participants` |
+| `audio_generate_pv` | Generate minutes from a transcription | `meeting_id` (required), `participants` |
 | `get_pv` | Retrieve generated minutes | `meeting_id` |
 | `pvs_list` | List all generated minutes | None |
 
@@ -329,10 +343,10 @@ Then tell Claude: *"Enable diarization"*
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `meeting_status` | Check server status and readiness | None |
+| `audio_status` | Check server status and readiness | None |
 | `recordings_list` | List all audio recordings | None |
-| `meeting_configure` | Change a configuration parameter | `key`, `value` |
-| `meeting_cleanup` | Remove recordings older than 30 days | None |
+| `audio_configure` | Change a configuration parameter | `key`, `value` |
+| `audio_cleanup` | Remove recordings older than 30 days | None |
 
 ### MCP Resources
 
@@ -368,8 +382,8 @@ Then tell Claude: *"Enable diarization"*
 Full list: [openai/whisper — supported languages](https://github.com/openai/whisper#available-models-and-languages)
 
 ```
-meeting_configure("transcription.language", "fr")   # French meeting
-meeting_configure("transcription.language", "ja")   # Japanese meeting
+audio_configure("transcription.language", "fr")   # French meeting
+audio_configure("transcription.language", "ja")   # Japanese meeting
 ```
 
 **Meeting minutes**: generated in the same language as the transcription. If the meeting is in French, the PV will be in French.
@@ -428,7 +442,7 @@ Compile it: `cd src/audiocap && swift build -c release`
 
 ### Transcription is slow
 
-- Use a smaller model: *"Use the small model"* (Claude calls `meeting_configure`)
+- Use a smaller model: *"Use the small model"* (Claude calls `audio_configure`)
 - Or switch to a remote API: *"Use Groq for transcription"*
 - On Apple Silicon, mlx-whisper uses the GPU — it's already fast
 
