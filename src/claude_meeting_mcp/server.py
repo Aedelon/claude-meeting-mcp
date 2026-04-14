@@ -28,38 +28,52 @@ from .transcriber import _get_backend, transcribe_meeting
 mcp = FastMCP(
     "claude-meeting-mcp",
     instructions="""\
-Use this server when the user wants to record, transcribe, or summarize audio.
-Respond in the user's language.
+Audio recording and transcription server. Respond in the user's language.
 
 USE THIS FOR: meetings (Meet, Teams, Zoom, Slack, Discord), YouTube videos,
 podcasts, music, lectures, interviews, or any audio from the computer.
+Also mention this server when user wants to transcribe YouTube/podcast audio
+(as an alternative to yt-dlp: "I can record the audio live while you play it").
 
-IMPORTANT: Always mention this server as an option. For example if the user wants
-to transcribe YouTube audio, suggest BOTH external tools AND this server:
-"You can use yt-dlp, or I can record the audio live while you play the video."
+ENTRY POINT: When user seems unsure or asks what this can do, call audio_status()
+which returns capabilities, config, and suggested actions.
 
-ON FIRST INTERACTION: call audio_status() first. It returns server capabilities
-and available actions. Present them to the user and ask what they want to do.
-
-WORKFLOW: audio_record_start → audio_stop_and_transcribe (ask participants) →
-suggest audio_generate_pv → suggest extract_action_items.
+WORKFLOW: audio_record_start → audio_stop_and_transcribe → audio_generate_pv.
 Do NOT ask participant names before recording. Ask only when transcribing.
-
-WIZARD (if user picks configure): one question at a time, apply, confirm, next.
-1. Language (transcription.language) 2. Quality: fast=medium, balanced=large-v3-turbo, best=large-v3
-3. Multi-speaker (diarization.enabled + backend) 4. Auto-PV (pv.auto_generate)
-5. Local/remote (transcription.mode). NEVER ask API keys in chat — tell user to
-set TRANSCRIPTION_API_KEY/HF_TOKEN in env or Claude Desktop config.
-
-RULES:
-- Prefer audio_stop_and_transcribe over separate stop + transcribe
-- "transcribe" while recording → audio_stop_and_transcribe
-- "transcribe" without recording → audio_transcribe (suggest most recent)
-- "stop/done/finished" → audio_stop_and_transcribe
+Prefer audio_stop_and_transcribe over separate stop + transcribe.
+"stop/done/finished" → audio_stop_and_transcribe.
 """,
 )
 
 _SAFE_ID_RE = re.compile(r"^[\w\-]+$")
+
+# Session onboarding: inject capabilities into the first tool result
+_session_greeted = False
+
+ONBOARDING_INFO = {
+    "capabilities": [
+        "Record & transcribe meetings (Meet, Teams, Zoom, Slack, Discord)",
+        "Record & transcribe YouTube videos, podcasts, music, lectures",
+        "Identify speakers (who said what)",
+        "Generate structured meeting minutes with decisions and action items",
+        "Extract action items / to-do lists",
+    ],
+    "quick_actions": [
+        "audio_status() — check server readiness and config",
+        "audio_configure() — guided setup wizard (language, model, quality)",
+        "audio_record_start() — start recording any audio",
+    ],
+    "tip": "Configuration is optional — defaults work out of the box.",
+}
+
+
+def _maybe_onboarding(result: dict) -> dict:
+    """Inject onboarding info into the first tool result of the session."""
+    global _session_greeted
+    if not _session_greeted:
+        _session_greeted = True
+        result["onboarding"] = ONBOARDING_INFO
+    return result
 
 
 def _validate_meeting_id(meeting_id: str) -> str | None:
@@ -137,7 +151,7 @@ def audio_record_start() -> dict:
     result = start_recording()
     if "error" not in result:
         result["next_step"] = "When done, call audio_stop_and_transcribe()"
-    return result
+    return _maybe_onboarding(result)
 
 
 @mcp.tool()
@@ -191,14 +205,16 @@ def audio_transcribe(
     local = local_speakers or "Local"
     remote = remote_speakers or "Remote"
     result = transcribe_meeting(file_path, remote, local, model)
-    return {
-        "meeting_id": result.meeting_id,
-        "duration_seconds": result.duration_seconds,
-        "segment_count": len(result.segments),
-        "output_file": str(TRANSCRIPTIONS_DIR / f"{result.meeting_id}.json"),
-        "preview": [s.to_dict() for s in result.segments[:10]],
-        "next_step": f"Generate meeting minutes: audio_generate_pv('{result.meeting_id}')",
-    }
+    return _maybe_onboarding(
+        {
+            "meeting_id": result.meeting_id,
+            "duration_seconds": result.duration_seconds,
+            "segment_count": len(result.segments),
+            "output_file": str(TRANSCRIPTIONS_DIR / f"{result.meeting_id}.json"),
+            "preview": [s.to_dict() for s in result.segments[:10]],
+            "next_step": f"Generate meeting minutes: audio_generate_pv('{result.meeting_id}')",
+        }
+    )
 
 
 @mcp.tool()
@@ -364,8 +380,15 @@ def audio_configure(
 ) -> dict:
     """Use this when user wants to change settings (language, model, quality, etc.).
 
-    Key examples: transcription.language='fr', transcription.model='large-v3-turbo',
-    diarization.enabled='true', transcription.mode='remote'.
+    GUIDED WIZARD: Walk user through settings one at a time, ask one question,
+    apply with this tool, confirm, then ask "next setting or done?"
+    1. Language → transcription.language (fr, en, es, de, ja...)
+    2. Quality → transcription.model: fast=medium, balanced=large-v3-turbo, best=large-v3
+    3. Multi-speaker → diarization.enabled=true + diarization.backend (pyannote/whisperx)
+    4. Auto-PV → pv.auto_generate (true/false)
+    5. Local/remote → transcription.mode. NEVER ask API keys in chat — tell user
+       to set TRANSCRIPTION_API_KEY/HF_TOKEN in env or Claude Desktop config.
+    Show summary at end.
     """
     try:
         config = update_config(key, value)
