@@ -1,71 +1,69 @@
 import Foundation
 
-/// Lock-free single-producer single-consumer ring buffer for Float samples.
+/// Lock-free single-producer single-consumer ring buffer for raw bytes.
 /// The IOProc callback (real-time thread) writes, the file writer thread reads.
 final class RingBuffer {
     private let capacity: Int
-    private let buffer: UnsafeMutablePointer<Float>
+    private let buffer: UnsafeMutableRawPointer
     private var writeIndex: Int = 0
     private var readIndex: Int = 0
 
-    /// Create a ring buffer with the given capacity in Float samples.
     init(capacity: Int) {
         self.capacity = capacity
-        self.buffer = .allocate(capacity: capacity)
-        self.buffer.initialize(repeating: 0.0, count: capacity)
+        self.buffer = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 16)
+        self.buffer.initializeMemory(as: UInt8.self, repeating: 0, count: capacity)
     }
 
     deinit {
         buffer.deallocate()
     }
 
-    /// Number of samples available to read.
-    var availableToRead: Int {
+    var availableBytesToRead: Int {
         let w = writeIndex
         let r = readIndex
         if w >= r { return w - r }
         return capacity - r + w
     }
 
-    /// Number of samples that can be written.
-    var availableToWrite: Int {
-        return capacity - 1 - availableToRead
+    var availableBytesToWrite: Int {
+        return capacity - 1 - availableBytesToRead
     }
 
-    /// Write samples into the ring buffer. Returns number of samples actually written.
-    /// Safe to call from the real-time IOProc thread (no allocation, no locks).
+    /// Write raw bytes. Returns number of bytes actually written.
+    /// Safe to call from the real-time IOProc thread.
     @discardableResult
-    func write(_ source: UnsafePointer<Float>, count: Int) -> Int {
-        let toWrite = min(count, availableToWrite)
+    func writeBytes(_ source: UnsafeRawPointer, count: Int) -> Int {
+        let toWrite = min(count, availableBytesToWrite)
         if toWrite == 0 { return 0 }
 
         let w = writeIndex
         let firstChunk = min(toWrite, capacity - w)
-        buffer.advanced(by: w).update(from: source, count: firstChunk)
+        buffer.advanced(by: w).copyMemory(from: source, byteCount: firstChunk)
 
         if firstChunk < toWrite {
             let secondChunk = toWrite - firstChunk
-            buffer.update(from: source.advanced(by: firstChunk), count: secondChunk)
+            buffer.copyMemory(from: source.advanced(by: firstChunk), byteCount: secondChunk)
         }
 
         writeIndex = (w + toWrite) % capacity
         return toWrite
     }
 
-    /// Read samples from the ring buffer into the destination.
-    /// Returns number of samples actually read.
+    /// Read raw bytes into destination. Returns number of bytes actually read.
     @discardableResult
-    func read(into destination: UnsafeMutablePointer<Float>, count: Int) -> Int {
-        let toRead = min(count, availableToRead)
+    func readBytes(_ destination: UnsafeMutableRawPointer, count: Int) -> Int {
+        let toRead = min(count, availableBytesToRead)
         if toRead == 0 { return 0 }
 
         let r = readIndex
         let firstChunk = min(toRead, capacity - r)
-        destination.update(from: buffer.advanced(by: r), count: firstChunk)
+        destination.copyMemory(from: buffer.advanced(by: r), byteCount: firstChunk)
 
         if firstChunk < toRead {
             let secondChunk = toRead - firstChunk
-            destination.advanced(by: firstChunk).update(from: buffer.advanced(by: r), count: secondChunk)
+            destination.advanced(by: firstChunk).copyMemory(
+                from: buffer, byteCount: secondChunk
+            )
         }
 
         readIndex = (r + toRead) % capacity

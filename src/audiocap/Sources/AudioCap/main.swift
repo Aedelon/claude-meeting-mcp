@@ -2,15 +2,14 @@ import CoreAudio
 import Foundation
 
 // =============================================================================
-// audiocap - Capture system audio + microphone via Core Audio Taps
+// audiocap - Capture system audio via Core Audio Taps
 //
 // Usage:
 //   audiocap --output <path.wav>
 //   Stop with Ctrl+C (SIGINT)
 //
-// Output: Stereo WAV 44.1kHz 16-bit
-//   Left channel  = system audio (all apps)
-//   Right channel = default microphone
+// Output: Stereo WAV at tap native sample rate, 16-bit PCM
+//   Both channels = system audio (stereo mixdown)
 //
 // Requires: macOS 14.4+
 // =============================================================================
@@ -37,11 +36,17 @@ var recorder: StereoRecorder?
 
 do {
     try tapManager.create()
-    fputs("audiocap: Tap and aggregate device created\n", stderr)
+
+    guard let tapFormat = tapManager.tapFormat else {
+        fputs("audiocap: Error: No tap format available\n", stderr)
+        tapManager.destroy()
+        exit(1)
+    }
 
     recorder = try StereoRecorder(
         aggregateID: tapManager.aggregateID,
-        outputPath: outputPath
+        outputPath: outputPath,
+        tapFormat: tapFormat
     )
     try recorder?.start()
     fputs("audiocap: Recording to \(outputPath)\n", stderr)
@@ -53,7 +58,6 @@ do {
 
 // MARK: - SIGINT Handler
 
-// Ignore default SIGINT behavior
 signal(SIGINT, SIG_IGN)
 
 let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
