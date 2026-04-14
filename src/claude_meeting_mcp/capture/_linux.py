@@ -184,9 +184,10 @@ class LinuxCapturer:
             if self._output_path is None:
                 return
 
-            from .audio_processing import process_stereo
+            from .audio_processing import AudioProcessingState, process_stereo
 
             wav_file: sf.SoundFile | None = None
+            audio_state = AudioProcessingState()
 
             while not self._stop_event.is_set() or self._system_buffer:
                 if not self._system_buffer or not self._mic_buffer:
@@ -212,7 +213,10 @@ class LinuxCapturer:
                     continue
 
                 left_proc, right_proc = process_stereo(
-                    left[:min_len], right[:min_len], sample_rate=self._samplerate
+                    left[:min_len],
+                    right[:min_len],
+                    sample_rate=self._samplerate,
+                    state=audio_state,
                 )
                 stereo = np.column_stack([left_proc, right_proc])
 

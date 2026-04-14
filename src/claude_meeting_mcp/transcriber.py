@@ -148,10 +148,27 @@ def _can_parallelize() -> bool:
         return True
     if backend == "mlx":
         return False  # MLX monopolizes Metal GPU
-    # faster-whisper: CTranslate2 releases the GIL — safe to parallelize on CPU
-    if backend == "faster" and _faster_model is not None:
+    if backend == "faster":
+        # CTranslate2 releases the GIL — safe to parallelize
+        # Pre-load model if not yet loaded so first call benefits too
+        if _faster_model is None:
+            _ensure_faster_model()
         return True
     return False
+
+
+def _ensure_faster_model() -> None:
+    """Ensure faster-whisper model is loaded (for parallelization check)."""
+    global _faster_model, _faster_model_name
+    if _faster_model is not None:
+        return
+    from faster_whisper import WhisperModel
+
+    config = get_config()
+    model_id = get_faster_model_id(config.whisper.model)
+    _faster_model = WhisperModel(model_id, device="auto", compute_type="auto")
+    _faster_model_name = model_id
+    logger.info("Faster-whisper model loaded: %s", model_id)
 
 
 def transcribe_channel(audio: np.ndarray, samplerate: int, model: str | None = None) -> list[dict]:

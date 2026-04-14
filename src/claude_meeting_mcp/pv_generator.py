@@ -1,5 +1,6 @@
 """Automatic meeting minutes (PV) generation via MCP Sampling."""
 
+import asyncio
 import logging
 
 from mcp.server.fastmcp import Context
@@ -174,8 +175,6 @@ async def generate_pv_map_reduce(
         known_info = f"\nKnown participants: {', '.join(known_participants)}\n"
 
     # Map: summarize each chunk in parallel
-    import asyncio
-
     async def _summarize_chunk(i: int, chunk: list[Segment]) -> str:
         chunk_text = format_segments_text(chunk)
         start_time = _format_time(chunk[0].start) if chunk else "0:00"
