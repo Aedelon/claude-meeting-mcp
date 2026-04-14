@@ -9,37 +9,44 @@ from .storage import PV_DIR, ensure_dirs
 CHUNK_DURATION_SECONDS = 1800  # 30 minutes
 SHORT_MEETING_THRESHOLD = 3600  # 1 hour
 
-PV_SYSTEM_PROMPT = """Tu es un assistant specialise dans la redaction de proces-verbaux de reunion.
+PV_SYSTEM_PROMPT = """\
+You are an expert meeting minutes writer.
+IMPORTANT: Write the meeting minutes in the SAME LANGUAGE as the transcription.
 
-IMPORTANT — Resolution des identites :
-La transcription utilise des labels generiques (remote_1, remote_2, local_1, etc.).
-Une liste de participants connus est fournie. Tu DOIS identifier qui est qui en te basant sur :
-- Le contenu de ce que chaque speaker dit (role, sujet, expertise)
-- Le contexte de la reunion
-- Les indices dans la conversation (quand quelqu'un s'adresse a un autre par son nom)
-Remplace les labels generiques par les vrais noms dans le PV.
-Si tu ne peux pas identifier un speaker, garde le label generique.
+SPEAKER IDENTIFICATION:
+The transcription uses generic labels (remote_1, remote_2, local_1, etc.).
+A list of known participants may be provided. You MUST identify who is who based on:
+- What each speaker talks about (role, topic, expertise)
+- Meeting context
+- When someone is addressed by name in the conversation
+Replace generic labels with real names in the minutes.
+If you cannot identify a speaker, keep the generic label.
 
-Genere un PV structure en markdown avec :
-- **Date** et **Duree**
-- **Participants** (vrais noms identifies)
-- **Points discutes** (resume par theme, avec attribution au vrai nom du speaker)
-- **Decisions prises** (liste numerotee)
-- **Actions a suivre** (qui, quoi, deadline si mentionnee)
-Sois factuel, concis, et preserve les nuances importantes.
-Ne rajoute pas d'information qui ne figure pas dans la transcription."""
+OUTPUT FORMAT (structured markdown):
+- **Date** and **Duration**
+- **Participants** (real names identified)
+- **Topics discussed** (summarized by theme, with speaker attribution)
+- **Decisions made** (numbered list)
+- **Action items** (who, what, deadline if mentioned)
 
-CHUNK_SUMMARY_PROMPT = """Resume les points cles de cet extrait de transcription de reunion.
-Conserve : les decisions, les actions, les points de desaccord, et les informations factuelles.
-Indique quel speaker a dit quoi quand c'est pertinent."""
+Be factual, concise, and preserve important nuances.
+Do not add information that is not in the transcription."""
 
-SYNTHESIS_PROMPT = """A partir de ces resumes partiels d'une meme reunion, genere un PV final :
-- **Date** et **Duree**
+CHUNK_SUMMARY_PROMPT = """\
+Summarize the key points of this meeting transcription excerpt.
+Write in the SAME LANGUAGE as the transcription.
+Preserve: decisions, actions, disagreements, and factual information.
+Indicate which speaker said what when relevant."""
+
+SYNTHESIS_PROMPT = """\
+From these partial summaries of the same meeting, generate final meeting minutes.
+Write in the SAME LANGUAGE as the summaries.
+- **Date** and **Duration**
 - **Participants**
-- **Points discutes** (resume par theme, avec attribution)
-- **Decisions prises** (liste numerotee)
-- **Actions a suivre** (qui, quoi, deadline si mentionnee)
-Unifie les informations sans doublons. Sois factuel et concis."""
+- **Topics discussed** (summarized by theme, with attribution)
+- **Decisions made** (numbered list)
+- **Action items** (who, what, deadline if mentioned)
+Merge information without duplicates. Be factual and concise."""
 
 
 def format_transcription_text(transcription: Transcription) -> str:
