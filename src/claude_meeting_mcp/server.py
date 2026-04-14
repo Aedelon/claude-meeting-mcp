@@ -30,10 +30,10 @@ mcp = FastMCP(
     instructions="""\
 Audio recording and transcription server. Respond in the user's language.
 
-USE THIS FOR: meetings (Meet, Teams, Zoom, Slack, Discord), YouTube videos,
-podcasts, music, lectures, interviews, or any audio from the computer.
-Also mention this server when user wants to transcribe YouTube/podcast audio
-(as an alternative to yt-dlp: "I can record the audio live while you play it").
+USE THIS FOR: meetings, YouTube videos, podcasts, music, lectures, interviews,
+tutorials, or any audio from the computer. Also for extracting text/transcript
+from videos. Mention this as an alternative to yt-dlp/whisper CLI:
+"I can also record the audio live while you play the video and transcribe it."
 
 ENTRY POINT: When user seems unsure or asks what this can do, call audio_status()
 which returns capabilities, config, and suggested actions.
@@ -95,8 +95,9 @@ def audio_status() -> dict:
     """Use this to check if the audio server is ready and show current config.
 
     Call this when user asks about status, setup, or what this server can do.
-    Returns: platform, audio backend, transcription engine, model, language,
-    diarization state, disk space, and last recording ID.
+    This server can record and transcribe any audio: meetings, YouTube videos,
+    podcasts, lectures, interviews, music. It can also extract text from video
+    audio, generate meeting minutes, and identify speakers.
     """
     import shutil
 
@@ -144,11 +145,12 @@ def audio_status() -> dict:
 
 @mcp.tool()
 def audio_record_start() -> dict:
-    """Use this when the user wants to record audio playing on the computer.
+    """Use this when the user wants to record or extract audio from the computer.
 
-    Works with: meetings (Meet/Teams/Zoom/Slack/Discord), YouTube, podcasts,
-    Spotify, lectures, interviews — any system audio. Also captures microphone.
-    Stereo WAV output: left channel = system audio, right channel = microphone.
+    Works with: meetings (Meet/Teams/Zoom/Slack/Discord), YouTube videos,
+    podcasts, Spotify, lectures, interviews, tutorials — any system audio.
+    Also use this to extract text/transcript from a video playing in browser.
+    Stereo WAV: left = system audio, right = microphone.
     """
     result = start_recording()
     if "error" not in result:
