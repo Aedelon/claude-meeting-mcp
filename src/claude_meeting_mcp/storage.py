@@ -46,6 +46,7 @@ def list_recordings() -> list[dict]:
         stat = f.stat()
         recordings.append(
             {
+                "meeting_id": f.stem,
                 "filename": f.name,
                 "path": str(f),
                 "size_mb": round(stat.st_size / (1024 * 1024), 1),
@@ -61,6 +62,7 @@ def list_transcriptions() -> list[dict]:
     for f in sorted(TRANSCRIPTIONS_DIR.glob("*.json"), reverse=True):
         transcriptions.append(
             {
+                "meeting_id": f.stem,
                 "filename": f.name,
                 "path": str(f),
                 "created": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
@@ -74,8 +76,12 @@ def list_pvs() -> list[dict]:
     ensure_dirs()
     pvs = []
     for f in sorted(PV_DIR.glob("*.md"), reverse=True):
+        # Remove _pv suffix to get meeting_id
+        stem = f.stem
+        meeting_id = stem.removesuffix("_pv")
         pvs.append(
             {
+                "meeting_id": meeting_id,
                 "filename": f.name,
                 "path": str(f),
                 "created": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),

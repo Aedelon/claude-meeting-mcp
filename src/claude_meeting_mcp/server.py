@@ -102,7 +102,10 @@ def meeting_record_stop() -> dict:
 
     Use meeting_stop_and_transcribe() instead if you also want to transcribe.
     """
-    return stop_recording()
+    result = stop_recording()
+    if "error" not in result:
+        result["next_step"] = "Transcribe with meeting_transcribe(file_path=...)"
+    return result
 
 
 @mcp.tool()
@@ -342,6 +345,8 @@ def meeting_cleanup() -> dict:
 @mcp.resource("transcription://{meeting_id}")
 def transcription_resource(meeting_id: str) -> str:
     """Read a transcription as a formatted text resource."""
+    if _validate_meeting_id(meeting_id):
+        return f"Invalid meeting_id: {meeting_id}"
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return f"Transcription not found: {meeting_id}"
@@ -352,6 +357,8 @@ def transcription_resource(meeting_id: str) -> str:
 @mcp.resource("pv://{meeting_id}")
 def pv_resource(meeting_id: str) -> str:
     """Read a meeting minutes (PV) resource."""
+    if _validate_meeting_id(meeting_id):
+        return f"Invalid meeting_id: {meeting_id}"
     pv_path = PV_DIR / f"{meeting_id}_pv.md"
     if not pv_path.exists():
         return f"PV not found for meeting: {meeting_id}"

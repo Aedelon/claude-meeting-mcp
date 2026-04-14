@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 MAX_RECORDING_SECONDS = 4 * 3600  # 4 hours default safety limit
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # Reentrant: _auto_stop calls stop_recording from Timer thread
 _capturer = None
 _current_file: str | None = None
 _timeout_timer: threading.Timer | None = None
