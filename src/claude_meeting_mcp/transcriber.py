@@ -1,7 +1,10 @@
 """Dual-backend transcription (MLX-Whisper / faster-whisper / remote) with speaker attribution."""
 
+import logging
 import os
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +13,8 @@ import soundfile as sf
 from .config import get_config, get_faster_model_id, get_mlx_model_id
 from .schemas import Segment, Transcription
 from .storage import TRANSCRIPTIONS_DIR, ensure_dirs
+
+logger = logging.getLogger(__name__)
 
 # Cached model instances (avoid reloading on every call)
 _faster_model = None
@@ -57,7 +62,7 @@ def _transcribe_mlx(audio: np.ndarray, samplerate: int, model: str | None = None
     model_id = get_mlx_model_id(model or config.whisper.model)
     language = config.whisper.language
 
-    audio = audio.astype(np.float32)
+    audio = audio.astype(np.float32, copy=False)
     result = mlx_whisper.transcribe(
         audio,
         path_or_hf_repo=model_id,
@@ -81,7 +86,7 @@ def _transcribe_faster(audio: np.ndarray, samplerate: int, model: str | None = N
         _faster_model = WhisperModel(model_id, device="auto", compute_type="auto")
         _faster_model_name = model_id
 
-    audio = audio.astype(np.float32)
+    audio = audio.astype(np.float32, copy=False)
     segments_gen, info = _faster_model.transcribe(
         audio,
         language=language,
@@ -136,6 +141,19 @@ def _transcribe_remote_channel(wav_path: str, channel: str = "left") -> list[dic
     ]
 
 
+def _can_parallelize() -> bool:
+    """Check if dual-channel transcription can be parallelized."""
+    backend = _get_backend()
+    if backend == "remote":
+        return True
+    if backend == "mlx":
+        return False  # MLX monopolizes Metal GPU
+    # faster-whisper: CTranslate2 releases the GIL — safe to parallelize on CPU
+    if backend == "faster" and _faster_model is not None:
+        return True
+    return False
+
+
 def transcribe_channel(audio: np.ndarray, samplerate: int, model: str | None = None) -> list[dict]:
     """Transcribe a single audio channel using the configured backend."""
     backend = _get_backend()
@@ -151,11 +169,13 @@ def transcribe_channel(audio: np.ndarray, samplerate: int, model: str | None = N
 
 def split_channels(wav_path: str) -> tuple[np.ndarray, np.ndarray, int]:
     """Split stereo WAV into left (system) and right (mic) channels."""
-    data, samplerate = sf.read(wav_path)
+    data, samplerate = sf.read(wav_path, dtype="float32")
     if data.ndim == 1:
-        # Mono file: same audio for both channels
-        return data, data, samplerate
-    return data[:, 0], data[:, 1], samplerate
+        return data, data.copy(), samplerate
+    left = np.ascontiguousarray(data[:, 0])
+    right = np.ascontiguousarray(data[:, 1])
+    del data  # Free stereo buffer immediately (~1 GB for 3h recording)
+    return left, right, samplerate
 
 
 def merge_segments(
@@ -246,18 +266,31 @@ def transcribe_meeting(
     left_audio, right_audio, samplerate = split_channels(wav_path)
     duration = len(left_audio) / samplerate
 
+    logger.info("Transcribing %s (%.1fs, %d Hz)", wav_path, duration, samplerate)
+    t0 = time.monotonic()
     backend = _get_backend()
 
     if backend == "remote":
         left_tmp = _save_channel_temp(left_audio, samplerate, "left")
         right_tmp = _save_channel_temp(right_audio, samplerate, "right")
         try:
-            left_segments = _transcribe_remote_channel(left_tmp, "left")
-            right_segments = _transcribe_remote_channel(right_tmp, "right")
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fl = pool.submit(_transcribe_remote_channel, left_tmp, "left")
+                fr = pool.submit(_transcribe_remote_channel, right_tmp, "right")
+                left_segments = fl.result()
+                right_segments = fr.result()
         finally:
             os.unlink(left_tmp)
             os.unlink(right_tmp)
+    elif _can_parallelize():
+        logger.info("Parallel transcription (backend=%s)", backend)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fl = pool.submit(transcribe_channel, left_audio, samplerate, model)
+            fr = pool.submit(transcribe_channel, right_audio, samplerate, model)
+            left_segments = fl.result()
+            right_segments = fr.result()
     else:
+        logger.info("Sequential transcription (backend=%s)", backend)
         left_segments = transcribe_channel(left_audio, samplerate, model)
         right_segments = transcribe_channel(right_audio, samplerate, model)
 
@@ -290,6 +323,13 @@ def transcribe_meeting(
     output_path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     output_path.write_text(transcription.to_json(), encoding="utf-8")
 
+    elapsed = time.monotonic() - t0
+    logger.info(
+        "Transcription complete: %d segments, %.1fs elapsed (backend=%s)",
+        len(segments),
+        elapsed,
+        backend,
+    )
     return transcription
 
 

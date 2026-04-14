@@ -28,71 +28,21 @@ from .transcriber import _get_backend, transcribe_meeting
 mcp = FastMCP(
     "claude-meeting-mcp",
     instructions="""\
-Meeting recording, transcription, and minutes generation for any video conferencing app.
-Always respond in the user's language.
+Meeting recording, transcription, and minutes (PV) server. Any conferencing app.
+Respond in the user's language.
 
-INTENT ROUTING — trigger words by language → tool:
+WORKFLOW: record → stop+transcribe (ask participants) → suggest PV → suggest action items
+- Start recording immediately. Do NOT ask for participant names before recording.
+- Ask for participants only when stopping/transcribing.
+- remote_speakers = people on the call (left channel), local_speakers = at the mic (right channel).
+- Prefer meeting_stop_and_transcribe() over separate stop + transcribe.
+- After transcription, always suggest generating meeting minutes with generate_meeting_pv().
+- For first-time users, call meeting_status() to verify setup.
 
-Record / start:
-  EN: "record", "start recording" | FR: "enregistre", "demarre" | ES: "graba", "empieza"
-  IT: "registra", "inizia" | PT: "grava", "comeca" | RU: "запиши", "начни"
-  ZH: "录音", "开始录制" | HE: "הקלט", "התחל הקלטה"
-  → meeting_record_start()
-
-Stop / finish:
-  EN: "stop", "done", "finish" | FR: "stop", "c'est fini", "arrete" | ES: "para", "termina"
-  IT: "ferma", "finito" | PT: "para", "terminou" | RU: "стоп", "закончи"
-  ZH: "停止", "结束" | HE: "עצור", "סיים"
-  → meeting_stop_and_transcribe() (preferred) or meeting_record_stop()
-
-Transcribe:
-  EN: "transcribe" | FR: "transcris" | ES: "transcribe" | IT: "trascrivi"
-  PT: "transcreve" | RU: "транскрибируй" | ZH: "转录" | HE: "תמלל"
-  → meeting_transcribe(file_path=...) for existing files
-  → meeting_stop_and_transcribe() after a recording
-
-Meeting minutes / summary:
-  EN: "minutes", "summary" | FR: "PV", "proces-verbal", "compte-rendu"
-  ES: "acta", "resumen" | IT: "verbale", "riassunto" | PT: "ata", "resumo"
-  RU: "протокол", "резюме" | ZH: "会议纪要", "总结" | HE: "פרוטוקול", "סיכום"
-  → generate_meeting_pv()
-
-Action items / tasks:
-  EN: "actions", "todo" | FR: "actions", "taches" | ES: "tareas", "acciones"
-  IT: "azioni", "compiti" | PT: "acoes", "tarefas" | RU: "задачи", "действия"
-  ZH: "行动项", "任务" | HE: "משימות", "פעולות"
-  → extract_action_items prompt
-
-Status / check:
-  EN: "status", "ready?" | FR: "statut", "ca marche?" | ES: "estado", "funciona?"
-  IT: "stato", "funziona?" | PT: "status", "funciona?" | RU: "статус", "работает?"
-  ZH: "状态", "准备好了吗" | HE: "סטטוס", "מוכן?"
-  → meeting_status()
-
-Settings:
-  EN: "settings", "config" | FR: "configuration", "parametres"
-  ES: "configuracion", "ajustes" | IT: "configurazione", "impostazioni"
-  PT: "configuracao" | RU: "настройки" | ZH: "设置", "配置" | HE: "הגדרות"
-  → meeting_configure()
-
-History:
-  EN: "list", "history", "past meetings" | FR: "liste", "historique", "reunions passees"
-  ES: "lista", "historial" | IT: "lista", "storico" | PT: "lista", "historico"
-  RU: "список", "история" | ZH: "列表", "历史" | HE: "רשימה", "היסטוריה"
-  → recordings_list() / transcriptions_list() / pvs_list()
-
-Cleanup:
-  EN: "cleanup", "delete old" | FR: "nettoyer", "supprimer" | ES: "limpiar", "borrar"
-  IT: "pulisci", "elimina" | PT: "limpar", "apagar" | RU: "очистить", "удалить"
-  ZH: "清理", "删除旧的" | HE: "נקה", "מחק"
-  → meeting_cleanup()
-
-PARAMETERS:
-- Always ask for participant names if not provided
-- remote_speakers = people on the call (system audio, left channel)
-- local_speakers = people in the room with the microphone (right channel)
-- Prefer meeting_stop_and_transcribe over separate stop + transcribe calls
-- After transcription, suggest generating meeting minutes
+DISAMBIGUATION:
+- User wants to transcribe while recording is active → meeting_stop_and_transcribe()
+- User wants to transcribe with no active recording → meeting_transcribe() (suggest most recent)
+- User says stop/done/finished → meeting_stop_and_transcribe() (not just meeting_record_stop)
 """,
 )
 
@@ -140,7 +90,10 @@ def meeting_record_start() -> dict:
     plus the microphone into a stereo WAV file.
     Left channel = system/remote audio. Right channel = microphone/local audio.
     """
-    return start_recording()
+    result = start_recording()
+    if "error" not in result:
+        result["next_step"] = "When the meeting is over, call meeting_stop_and_transcribe()"
+    return result
 
 
 @mcp.tool()
@@ -192,6 +145,7 @@ def meeting_transcribe(
         "segment_count": len(result.segments),
         "output_file": str(TRANSCRIPTIONS_DIR / f"{result.meeting_id}.json"),
         "preview": [s.to_dict() for s in result.segments[:10]],
+        "next_step": f"Generate meeting minutes: generate_meeting_pv('{result.meeting_id}')",
     }
 
 
@@ -333,6 +287,7 @@ async def generate_meeting_pv(
         "pv_file": pv_path,
         "pv_preview": pv_text[:500],
         "strategy": "direct" if transcription.duration_seconds < 3600 else "map-reduce",
+        "next_step": f"Extract action items with extract_action_items prompt for '{meeting_id}'",
     }
 
 

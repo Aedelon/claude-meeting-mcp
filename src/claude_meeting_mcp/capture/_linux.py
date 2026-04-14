@@ -1,11 +1,18 @@
 """Linux audio capture via PipeWire/PulseAudio monitor + microphone (sounddevice)."""
 
+import logging
 import subprocess
 import threading
+import time
 from collections import deque
 
 import numpy as np
 import soundfile as sf
+
+logger = logging.getLogger(__name__)
+
+# Flush interval for incremental WAV writing (seconds)
+_FLUSH_INTERVAL = 0.5
 
 
 def _detect_audio_server() -> str:
@@ -90,7 +97,7 @@ class LinuxCapturer:
 
         t_system = threading.Thread(target=self._capture_system, daemon=True)
         t_mic = threading.Thread(target=self._capture_mic, daemon=True)
-        t_writer = threading.Thread(target=self._write_wav, daemon=True)
+        t_writer = threading.Thread(target=self._write_wav_incremental, daemon=True)
 
         self._threads = [t_system, t_mic, t_writer]
         for t in self._threads:
@@ -113,7 +120,6 @@ class LinuxCapturer:
         try:
             import sounddevice as sd
 
-            # Find the monitor device index
             devices = sd.query_devices()
             monitor_idx = None
             for i, dev in enumerate(devices):
@@ -122,7 +128,6 @@ class LinuxCapturer:
                     break
 
             if monitor_idx is None:
-                # Try matching by "monitor" keyword
                 for i, dev in enumerate(devices):
                     if "monitor" in dev.get("name", "").lower() and dev["max_input_channels"] > 0:
                         monitor_idx = i
@@ -170,33 +175,61 @@ class LinuxCapturer:
         except Exception as e:
             self._error = e
 
-    def _write_wav(self) -> None:
-        """Interleave system + mic buffers and write stereo WAV."""
-        try:
-            self._stop_event.wait()
+    def _write_wav_incremental(self) -> None:
+        """Incrementally write stereo WAV — flushes every 500ms.
 
+        If the process crashes, we lose at most 500ms of audio instead of everything.
+        """
+        try:
             if self._output_path is None:
                 return
 
-            left = (
-                np.concatenate(list(self._system_buffer)) if self._system_buffer else np.array([])
-            )
-            right = np.concatenate(list(self._mic_buffer)) if self._mic_buffer else np.array([])
-
-            min_len = min(len(left), len(right))
-            if min_len == 0:
-                self._error = RuntimeError("No audio data captured")
-                return
-
-            # Audio processing: normalize → compress → limit
             from .audio_processing import process_stereo
 
-            left_proc, right_proc = process_stereo(
-                left[:min_len], right[:min_len], sample_rate=self._samplerate
-            )
+            wav_file: sf.SoundFile | None = None
 
-            stereo = np.column_stack([left_proc, right_proc])
-            sf.write(self._output_path, stereo, self._samplerate)
+            while not self._stop_event.is_set() or self._system_buffer:
+                if not self._system_buffer or not self._mic_buffer:
+                    time.sleep(_FLUSH_INTERVAL)
+                    continue
+
+                # Drain available buffers
+                left_chunks = []
+                while self._system_buffer:
+                    left_chunks.append(self._system_buffer.popleft())
+                right_chunks = []
+                while self._mic_buffer:
+                    right_chunks.append(self._mic_buffer.popleft())
+
+                if not left_chunks or not right_chunks:
+                    continue
+
+                left = np.concatenate(left_chunks)
+                right = np.concatenate(right_chunks)
+
+                min_len = min(len(left), len(right))
+                if min_len == 0:
+                    continue
+
+                left_proc, right_proc = process_stereo(
+                    left[:min_len], right[:min_len], sample_rate=self._samplerate
+                )
+                stereo = np.column_stack([left_proc, right_proc])
+
+                if wav_file is None:
+                    wav_file = sf.SoundFile(
+                        self._output_path,
+                        mode="w",
+                        samplerate=self._samplerate,
+                        channels=2,
+                        subtype="PCM_16",
+                    )
+
+                wav_file.write(stereo)
+                wav_file.flush()
+
+            if wav_file is not None:
+                wav_file.close()
 
         except Exception as e:
             self._error = e

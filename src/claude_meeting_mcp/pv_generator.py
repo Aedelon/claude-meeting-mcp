@@ -1,10 +1,14 @@
 """Automatic meeting minutes (PV) generation via MCP Sampling."""
 
+import logging
+
 from mcp.server.fastmcp import Context
 from mcp.types import SamplingMessage, TextContent
 
 from .schemas import Segment, Transcription
 from .storage import PV_DIR, ensure_dirs
+
+logger = logging.getLogger(__name__)
 
 CHUNK_DURATION_SECONDS = 1800  # 30 minutes
 SHORT_MEETING_THRESHOLD = 3600  # 1 hour
@@ -131,6 +135,7 @@ async def generate_pv_direct(
     known_participants: list[str] | None = None,
 ) -> str:
     """Generate PV for short meetings (<1h) in a single sampling call."""
+    logger.info("Generating PV (direct) for %s", transcription.meeting_id)
     transcript_text = format_transcription_text(transcription)
 
     participants_info = ", ".join(transcription.speakers.values())
@@ -160,18 +165,22 @@ async def generate_pv_map_reduce(
 ) -> str:
     """Generate PV for long meetings (>=1h) using map-reduce strategy."""
     chunks = split_transcription_by_duration(transcription, CHUNK_DURATION_SECONDS)
+    logger.info(
+        "Generating PV (map-reduce) for %s: %d chunks", transcription.meeting_id, len(chunks)
+    )
 
     known_info = ""
     if known_participants:
         known_info = f"\nKnown participants: {', '.join(known_participants)}\n"
 
-    # Map: summarize each chunk
-    partial_summaries = []
-    for i, chunk in enumerate(chunks):
+    # Map: summarize each chunk in parallel
+    import asyncio
+
+    async def _summarize_chunk(i: int, chunk: list[Segment]) -> str:
         chunk_text = format_segments_text(chunk)
         start_time = _format_time(chunk[0].start) if chunk else "0:00"
         end_time = _format_time(chunk[-1].end) if chunk else "0:00"
-
+        logger.info("Summarizing chunk %d/%d (%s - %s)", i + 1, len(chunks), start_time, end_time)
         summary = await _call_sampling(
             ctx,
             user_text=(
@@ -180,7 +189,10 @@ async def generate_pv_map_reduce(
             system_prompt=CHUNK_SUMMARY_PROMPT,
             max_tokens=2048,
         )
-        partial_summaries.append(f"## Part {i + 1} ({start_time} - {end_time})\n{summary}")
+        return f"## Part {i + 1} ({start_time} - {end_time})\n{summary}"
+
+    tasks = [_summarize_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+    partial_summaries = list(await asyncio.gather(*tasks))
 
     # Reduce: synthesize all summaries into final PV
     all_summaries = "\n\n".join(partial_summaries)

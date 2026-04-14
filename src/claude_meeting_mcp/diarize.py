@@ -7,9 +7,12 @@ into per-speaker segments.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Cached pipeline singleton
 _pipeline = None
@@ -37,10 +40,12 @@ def _get_pipeline():
             "Get a free token at https://huggingface.co/settings/tokens"
         )
 
+    logger.info("Loading pyannote speaker-diarization-3.1 pipeline...")
     _pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         token=token,
     )
+    logger.info("Pyannote pipeline loaded")
     return _pipeline
 
 
@@ -76,6 +81,8 @@ def diarize_channel(audio: np.ndarray, samplerate: int) -> list[dict]:
             }
         )
 
+    unique_speakers = set(s["speaker"] for s in segments)
+    logger.info("Diarization found %d speakers, %d segments", len(unique_speakers), len(segments))
     return segments
 
 

@@ -1,10 +1,17 @@
 """Windows audio capture via WASAPI loopback (PyAudioWPatch) + microphone (sounddevice)."""
 
+import logging
 import threading
+import time
 from collections import deque
 
 import numpy as np
 import soundfile as sf
+
+logger = logging.getLogger(__name__)
+
+# Flush interval for incremental WAV writing (seconds)
+_FLUSH_INTERVAL = 0.5
 
 
 class WindowsCapturer:
@@ -40,7 +47,7 @@ class WindowsCapturer:
 
         t_loopback = threading.Thread(target=self._capture_loopback, daemon=True)
         t_mic = threading.Thread(target=self._capture_mic, daemon=True)
-        t_writer = threading.Thread(target=self._write_wav, daemon=True)
+        t_writer = threading.Thread(target=self._write_wav_incremental, daemon=True)
 
         self._threads = [t_loopback, t_mic, t_writer]
         for t in self._threads:
@@ -65,7 +72,6 @@ class WindowsCapturer:
 
             pa = pyaudio.PyAudio()
 
-            # Find WASAPI loopback device
             wasapi_info = None
             for i in range(pa.get_host_api_count()):
                 info = pa.get_host_api_info_by_index(i)
@@ -77,7 +83,6 @@ class WindowsCapturer:
                 self._error = RuntimeError("WASAPI host API not found")
                 return
 
-            # Find default loopback device
             default_speakers = pa.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
             loopback_device = None
 
@@ -104,7 +109,6 @@ class WindowsCapturer:
             while not self._stop_event.is_set():
                 data = stream.read(1024, exception_on_overflow=False)
                 audio = np.frombuffer(data, dtype=np.float32)
-                # Take first channel if stereo
                 if loopback_device.get("maxInputChannels", 1) > 1:
                     channels = int(loopback_device["maxInputChannels"])
                     audio = audio.reshape(-1, channels)[:, 0]
@@ -137,37 +141,62 @@ class WindowsCapturer:
         except Exception as e:
             self._error = e
 
-    def _write_wav(self) -> None:
-        """Interleave loopback + mic buffers and write stereo WAV."""
-        try:
-            # Wait for recording to stop
-            self._stop_event.wait()
+    def _write_wav_incremental(self) -> None:
+        """Incrementally write stereo WAV — flushes every 500ms instead of at the end.
 
+        If the process crashes, we lose at most 500ms of audio instead of everything.
+        """
+        try:
             if self._output_path is None:
                 return
 
-            left = (
-                np.concatenate(list(self._loopback_buffer))
-                if self._loopback_buffer
-                else np.array([])
-            )
-            right = np.concatenate(list(self._mic_buffer)) if self._mic_buffer else np.array([])
-
-            # Align lengths
-            min_len = min(len(left), len(right))
-            if min_len == 0:
-                self._error = RuntimeError("No audio data captured")
-                return
-
-            # Audio processing: normalize → compress → limit
             from .audio_processing import process_stereo
 
-            left_proc, right_proc = process_stereo(
-                left[:min_len], right[:min_len], sample_rate=self._samplerate
-            )
+            wav_file: sf.SoundFile | None = None
 
-            stereo = np.column_stack([left_proc, right_proc])
-            sf.write(self._output_path, stereo, self._samplerate)
+            while not self._stop_event.is_set() or self._loopback_buffer:
+                if not self._loopback_buffer or not self._mic_buffer:
+                    time.sleep(_FLUSH_INTERVAL)
+                    continue
+
+                # Drain available buffers
+                left_chunks = []
+                while self._loopback_buffer:
+                    left_chunks.append(self._loopback_buffer.popleft())
+                right_chunks = []
+                while self._mic_buffer:
+                    right_chunks.append(self._mic_buffer.popleft())
+
+                if not left_chunks or not right_chunks:
+                    continue
+
+                left = np.concatenate(left_chunks)
+                right = np.concatenate(right_chunks)
+
+                min_len = min(len(left), len(right))
+                if min_len == 0:
+                    continue
+
+                left_proc, right_proc = process_stereo(
+                    left[:min_len], right[:min_len], sample_rate=self._samplerate
+                )
+                stereo = np.column_stack([left_proc, right_proc])
+
+                # Open file on first write
+                if wav_file is None:
+                    wav_file = sf.SoundFile(
+                        self._output_path,
+                        mode="w",
+                        samplerate=self._samplerate,
+                        channels=2,
+                        subtype="PCM_16",
+                    )
+
+                wav_file.write(stereo)
+                wav_file.flush()
+
+            if wav_file is not None:
+                wav_file.close()
 
         except Exception as e:
             self._error = e
