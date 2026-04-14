@@ -34,8 +34,8 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def check_status() -> dict:
-    """Check server status: platform, audio capture backend, transcription backend."""
+def meeting_status() -> dict:
+    """Check meeting server status: platform, audio capture backend, transcription backend."""
     capturer = get_capturer()
     config = get_config()
     return {
@@ -50,7 +50,7 @@ def check_status() -> dict:
 
 
 @mcp.tool()
-def record_start() -> dict:
+def meeting_record_start() -> dict:
     """Start recording system audio and microphone.
 
     Creates a stereo WAV file: left channel = system audio, right channel = microphone.
@@ -59,13 +59,13 @@ def record_start() -> dict:
 
 
 @mcp.tool()
-def record_stop() -> dict:
+def meeting_record_stop() -> dict:
     """Stop the current recording and save the WAV file."""
     return stop_recording()
 
 
 @mcp.tool()
-def transcribe(
+def meeting_transcribe(
     file_path: str,
     local_speakers: str | None = None,
     remote_speakers: str | None = None,
@@ -128,7 +128,7 @@ def pvs_list() -> list[dict]:
 
 
 @mcp.tool()
-def record_and_transcribe(
+def meeting_record_and_transcribe(
     local_speakers: str | None = None,
     remote_speakers: str | None = None,
     model: str | None = None,
@@ -145,12 +145,12 @@ def record_and_transcribe(
         return stop_result
 
     file_path = stop_result["file"]
-    return transcribe(file_path, local_speakers, remote_speakers, model)
+    return meeting_transcribe(file_path, local_speakers, remote_speakers, model)
 
 
 @mcp.tool()
-def cleanup() -> dict:
-    """Remove audio recordings older than 30 days."""
+def meeting_cleanup() -> dict:
+    """Remove meeting audio recordings older than 30 days."""
     removed = cleanup_old_recordings()
     return {"removed_count": len(removed), "removed_files": removed}
 
@@ -278,11 +278,11 @@ def extract_action_items(meeting_id: str) -> str:
 
 
 @mcp.tool()
-def configure(key: str, value: str) -> dict:
-    """Modify a configuration parameter.
+def meeting_configure(key: str, value: str) -> dict:
+    """Modify a claude-meeting-mcp configuration parameter.
 
     Args:
-        key: Config key (e.g., 'whisper.model', 'whisper.mode', 'recording.left_speaker')
+        key: Config key (e.g., 'whisper.model', 'diarization.enabled', 'diarization.backend')
         value: New value
     """
     try:
