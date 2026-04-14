@@ -1,5 +1,7 @@
 """Global configuration system with TOML support."""
 
+from __future__ import annotations
+
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -31,6 +33,7 @@ FASTER_MODEL_MAP: dict[str, str] = {
 
 VALID_MODELS = set(MLX_MODEL_MAP.keys())
 VALID_MODES = {"local", "remote"}
+VALID_DIARIZATION_BACKENDS = {"none", "whisperx", "pyannote"}
 
 
 @dataclass
@@ -49,9 +52,13 @@ class WhisperConfig:
 
 @dataclass
 class RecordingConfig:
-    left_speaker: str = "Bruno"
-    right_speaker: str = "Delanoe"
-    sample_rate: int = 44100
+    sample_rate: int = 48000
+
+
+@dataclass
+class DiarizationConfig:
+    enabled: bool = False
+    backend: str = "none"  # none, whisperx, pyannote
 
 
 @dataclass
@@ -63,6 +70,7 @@ class PVConfig:
 class Config:
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     pv: PVConfig = field(default_factory=PVConfig)
 
 
@@ -98,12 +106,15 @@ def _apply_toml_to_config(config: Config, data: dict[str, Any]) -> None:
 
     if "recording" in data:
         rec = data["recording"]
-        if "left_speaker" in rec:
-            config.recording.left_speaker = str(rec["left_speaker"])
-        if "right_speaker" in rec:
-            config.recording.right_speaker = str(rec["right_speaker"])
         if "sample_rate" in rec:
             config.recording.sample_rate = int(rec["sample_rate"])
+
+    if "diarization" in data:
+        d = data["diarization"]
+        if "enabled" in d:
+            config.diarization.enabled = bool(d["enabled"])
+        if "backend" in d:
+            config.diarization.backend = str(d["backend"])
 
     if "pv" in data:
         pv = data["pv"]
@@ -129,6 +140,11 @@ def validate_config(config: Config) -> list[str]:
         errors.append(
             f"Unusual sample rate {config.recording.sample_rate}. "
             "Expected: 16000, 22050, 44100, or 48000"
+        )
+    if config.diarization.backend not in VALID_DIARIZATION_BACKENDS:
+        errors.append(
+            f"Invalid diarization backend '{config.diarization.backend}'. "
+            f"Valid: {', '.join(sorted(VALID_DIARIZATION_BACKENDS))}"
         )
     return errors
 
@@ -163,9 +179,11 @@ def save_config(config: Config) -> Path:
         f'api_key_env = "{config.whisper.remote.api_key_env}"',
         "",
         "[recording]",
-        f'left_speaker = "{config.recording.left_speaker}"',
-        f'right_speaker = "{config.recording.right_speaker}"',
         f"sample_rate = {config.recording.sample_rate}",
+        "",
+        "[diarization]",
+        f"enabled = {'true' if config.diarization.enabled else 'false'}",
+        f'backend = "{config.diarization.backend}"',
         "",
         "[pv]",
         f"auto_generate = {'true' if config.pv.auto_generate else 'false'}",
@@ -209,7 +227,7 @@ def update_config(key: str, value: str) -> Config:
     """Update a single config key and save to disk.
 
     Args:
-        key: Dot-separated key (e.g., 'whisper.model', 'recording.left_speaker')
+        key: Dot-separated key (e.g., 'whisper.model', 'diarization.backend')
         value: New value as string
     """
     config = get_config()
@@ -219,10 +237,12 @@ def update_config(key: str, value: str) -> Config:
         section, field_name = parts
         if section == "whisper" and field_name in ("model", "language", "mode"):
             setattr(config.whisper, field_name, value)
-        elif section == "recording" and field_name in ("left_speaker", "right_speaker"):
-            setattr(config.recording, field_name, value)
         elif section == "recording" and field_name == "sample_rate":
             config.recording.sample_rate = int(value)
+        elif section == "diarization" and field_name == "backend":
+            config.diarization.backend = value
+        elif section == "diarization" and field_name == "enabled":
+            config.diarization.enabled = value.lower() in ("true", "1", "yes")
         elif section == "pv" and field_name == "auto_generate":
             config.pv.auto_generate = value.lower() in ("true", "1", "yes")
         else:

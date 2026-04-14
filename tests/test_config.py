@@ -23,9 +23,9 @@ def test_default_config():
     assert config.whisper.model == "large-v3-turbo"
     assert config.whisper.language == "fr"
     assert config.whisper.mode == "local"
-    assert config.recording.left_speaker == "Bruno"
-    assert config.recording.right_speaker == "Delanoe"
-    assert config.recording.sample_rate == 44100
+    assert config.recording.sample_rate == 48000
+    assert config.diarization.enabled is False
+    assert config.diarization.backend == "none"
     assert config.pv.auto_generate is True
 
 
@@ -35,9 +35,7 @@ def test_apply_toml_partial():
     _apply_toml_to_config(config, data)
     assert config.whisper.model == "small"
     assert config.whisper.language == "en"
-    # Unchanged defaults
     assert config.whisper.mode == "local"
-    assert config.recording.left_speaker == "Bruno"
 
 
 def test_apply_toml_remote():
@@ -55,11 +53,17 @@ def test_apply_toml_remote():
 
 def test_apply_toml_recording():
     config = Config()
-    data = {"recording": {"left_speaker": "Alice", "sample_rate": 16000}}
+    data = {"recording": {"sample_rate": 16000}}
     _apply_toml_to_config(config, data)
-    assert config.recording.left_speaker == "Alice"
     assert config.recording.sample_rate == 16000
-    assert config.recording.right_speaker == "Delanoe"  # unchanged
+
+
+def test_apply_toml_diarization():
+    config = Config()
+    data = {"diarization": {"enabled": True, "backend": "whisperx"}}
+    _apply_toml_to_config(config, data)
+    assert config.diarization.enabled is True
+    assert config.diarization.backend == "whisperx"
 
 
 def test_apply_toml_pv():
@@ -105,6 +109,13 @@ def test_validate_unusual_sample_rate():
     assert any("sample rate" in e.lower() for e in errors)
 
 
+def test_validate_invalid_diarization_backend():
+    config = Config()
+    config.diarization.backend = "invalid"
+    errors = validate_config(config)
+    assert any("diarization backend" in e.lower() for e in errors)
+
+
 def test_mlx_model_mapping():
     assert get_mlx_model_id("tiny") == "mlx-community/whisper-tiny"
     assert get_mlx_model_id("large-v3") == "mlx-community/whisper-large-v3"
@@ -130,7 +141,8 @@ def test_save_and_load_config(monkeypatch, tmp_path):
     config.whisper.model = "medium"
     config.whisper.mode = "remote"
     config.whisper.remote.url = "https://example.com/transcribe"
-    config.recording.left_speaker = "Alice"
+    config.diarization.enabled = True
+    config.diarization.backend = "whisperx"
     config.pv.auto_generate = False
 
     save_config(config)
@@ -139,14 +151,14 @@ def test_save_and_load_config(monkeypatch, tmp_path):
     assert loaded.whisper.model == "medium"
     assert loaded.whisper.mode == "remote"
     assert loaded.whisper.remote.url == "https://example.com/transcribe"
-    assert loaded.recording.left_speaker == "Alice"
+    assert loaded.diarization.enabled is True
+    assert loaded.diarization.backend == "whisperx"
     assert loaded.pv.auto_generate is False
 
 
 def test_load_config_missing_file(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
     config = load_config()
-    # Should return defaults
     assert config.whisper.model == "large-v3-turbo"
 
 
@@ -157,7 +169,6 @@ def test_update_config_whisper_model(monkeypatch, tmp_path):
     updated = update_config("whisper.model", "small")
     assert updated.whisper.model == "small"
 
-    # Verify persistence
     loaded = load_config()
     assert loaded.whisper.model == "small"
 
@@ -184,6 +195,17 @@ def test_update_config_sample_rate(monkeypatch, tmp_path):
 
     updated = update_config("recording.sample_rate", "48000")
     assert updated.recording.sample_rate == 48000
+
+
+def test_update_config_diarization(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_MEETING_CONFIG_DIR", str(tmp_path))
+    reload_config()
+
+    updated = update_config("diarization.backend", "whisperx")
+    assert updated.diarization.backend == "whisperx"
+
+    updated = update_config("diarization.enabled", "true")
+    assert updated.diarization.enabled is True
 
 
 def test_update_config_pv_auto_generate(monkeypatch, tmp_path):

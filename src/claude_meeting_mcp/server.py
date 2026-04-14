@@ -67,22 +67,25 @@ def record_stop() -> dict:
 @mcp.tool()
 def transcribe(
     file_path: str,
-    left_speaker: str | None = None,
-    right_speaker: str | None = None,
+    local_speakers: str | None = None,
+    remote_speakers: str | None = None,
     model: str | None = None,
 ) -> dict:
     """Transcribe a recorded meeting WAV file.
 
-    Splits stereo channels for automatic speaker attribution.
-    Uses the configured Whisper backend (MLX on macOS, faster-whisper elsewhere).
+    Splits stereo channels: left = remote (system audio), right = local (mic).
+    Speaker names are per-meeting, passed as comma-separated strings.
 
     Args:
         file_path: Path to the WAV file to transcribe
-        left_speaker: Name for system audio speaker (default from config)
-        right_speaker: Name for microphone speaker (default from config)
+        local_speakers: Comma-separated names of people at the mic (right channel)
+        remote_speakers: Comma-separated names of people on the call (left channel)
         model: Whisper model override (default from config)
     """
-    result = transcribe_meeting(file_path, left_speaker, right_speaker, model)
+    # Default names if not provided
+    local = local_speakers or "Local"
+    remote = remote_speakers or "Remote"
+    result = transcribe_meeting(file_path, remote, local, model)
     return {
         "meeting_id": result.meeting_id,
         "duration_seconds": result.duration_seconds,
@@ -126,15 +129,15 @@ def pvs_list() -> list[dict]:
 
 @mcp.tool()
 def record_and_transcribe(
-    left_speaker: str | None = None,
-    right_speaker: str | None = None,
+    local_speakers: str | None = None,
+    remote_speakers: str | None = None,
     model: str | None = None,
 ) -> dict:
     """Stop a running recording, then transcribe it immediately.
 
     Args:
-        left_speaker: Name for system audio speaker (default from config)
-        right_speaker: Name for microphone speaker (default from config)
+        local_speakers: Comma-separated names of people at the mic
+        remote_speakers: Comma-separated names of people on the call
         model: Whisper model override (default from config)
     """
     stop_result = stop_recording()
@@ -142,7 +145,7 @@ def record_and_transcribe(
         return stop_result
 
     file_path = stop_result["file"]
-    return transcribe(file_path, left_speaker, right_speaker, model)
+    return transcribe(file_path, local_speakers, remote_speakers, model)
 
 
 @mcp.tool()
