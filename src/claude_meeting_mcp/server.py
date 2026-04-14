@@ -444,6 +444,13 @@ def extract_action_items(meeting_id: str) -> str:
 
 def main():
     """Entry point for the MCP server."""
+    # Auto-cleanup old recordings on startup
+    removed = cleanup_old_recordings()
+    if removed:
+        import logging
+
+        logging.getLogger(__name__).info("Auto-cleanup: removed %d old recordings", len(removed))
+
     mcp.run()
 
 
