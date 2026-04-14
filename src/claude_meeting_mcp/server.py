@@ -1,14 +1,18 @@
 """MCP Server exposing meeting recording and transcription tools."""
 
+import json
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ClientCapabilities, SamplingCapability
 
 from .capture import get_capturer
 from .config import get_config, update_config, validate_config
+from .pv_generator import generate_pv, save_pv
 from .recorder import is_recording, start_recording, stop_recording
 from .schemas import Transcription
 from .storage import (
+    PV_DIR,
     TRANSCRIPTIONS_DIR,
     cleanup_old_recordings,
     list_pvs,
@@ -140,6 +144,120 @@ def cleanup() -> dict:
     """Remove audio recordings older than 30 days."""
     removed = cleanup_old_recordings()
     return {"removed_count": len(removed), "removed_files": removed}
+
+
+@mcp.tool()
+async def generate_meeting_pv(ctx: Context, meeting_id: str) -> dict:
+    """Generate a meeting minutes (PV) from a transcription using AI.
+
+    The PV is generated automatically via MCP Sampling (server asks Claude to summarize).
+    For meetings under 1h: single pass. For longer meetings: map-reduce strategy.
+
+    Args:
+        meeting_id: The meeting identifier (filename without .json extension)
+    """
+    # Load transcription
+    path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
+    if not path.exists():
+        return {"error": f"Transcription not found: {meeting_id}"}
+
+    transcription = Transcription.from_json(path.read_text(encoding="utf-8"))
+
+    # Check if client supports sampling
+    if not ctx.session.check_client_capability(ClientCapabilities(sampling=SamplingCapability())):
+        return {
+            "error": "Client does not support MCP Sampling. "
+            "Generate PV manually by reading the transcription."
+        }
+
+    # Generate PV
+    pv_text = await generate_pv(ctx, transcription)
+    pv_path = save_pv(meeting_id, pv_text)
+
+    return {
+        "meeting_id": meeting_id,
+        "pv_file": pv_path,
+        "pv_preview": pv_text[:500],
+        "strategy": "direct" if transcription.duration_seconds < 3600 else "map-reduce",
+    }
+
+
+@mcp.tool()
+def get_pv(meeting_id: str) -> dict:
+    """Retrieve a previously generated meeting minutes (PV).
+
+    Args:
+        meeting_id: The meeting identifier
+    """
+    pv_path = PV_DIR / f"{meeting_id}_pv.md"
+    if not pv_path.exists():
+        return {"error": f"PV not found for meeting: {meeting_id}"}
+    return {
+        "meeting_id": meeting_id,
+        "pv_file": str(pv_path),
+        "content": pv_path.read_text(encoding="utf-8"),
+    }
+
+
+# --- MCP Resources ---
+
+
+@mcp.resource("transcription://{meeting_id}")
+def transcription_resource(meeting_id: str) -> str:
+    """Read a transcription as a formatted text resource."""
+    path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
+    if not path.exists():
+        return f"Transcription not found: {meeting_id}"
+    t = Transcription.from_json(path.read_text(encoding="utf-8"))
+    return json.dumps(t.to_dict(), ensure_ascii=False, indent=2)
+
+
+@mcp.resource("pv://{meeting_id}")
+def pv_resource(meeting_id: str) -> str:
+    """Read a meeting minutes (PV) resource."""
+    pv_path = PV_DIR / f"{meeting_id}_pv.md"
+    if not pv_path.exists():
+        return f"PV not found for meeting: {meeting_id}"
+    return pv_path.read_text(encoding="utf-8")
+
+
+# --- MCP Prompts ---
+
+
+@mcp.prompt()
+def regenerate_pv(meeting_id: str) -> str:
+    """Regenerate a PV with custom instructions.
+
+    Args:
+        meeting_id: The meeting to regenerate PV for
+    """
+    path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
+    if not path.exists():
+        return f"Transcription not found: {meeting_id}"
+    t = Transcription.from_json(path.read_text(encoding="utf-8"))
+    transcript = json.dumps(t.to_dict(), ensure_ascii=False, indent=2)
+    return (
+        f"Voici la transcription de la reunion {meeting_id}. "
+        f"Genere un PV structure en markdown :\n\n{transcript}"
+    )
+
+
+@mcp.prompt()
+def extract_action_items(meeting_id: str) -> str:
+    """Extract only action items from a meeting.
+
+    Args:
+        meeting_id: The meeting to extract actions from
+    """
+    path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
+    if not path.exists():
+        return f"Transcription not found: {meeting_id}"
+    t = Transcription.from_json(path.read_text(encoding="utf-8"))
+    transcript = json.dumps(t.to_dict(), ensure_ascii=False, indent=2)
+    return (
+        f"Extrais uniquement les actions decidees dans cette reunion. "
+        f"Format : - [ ] Action (responsable, deadline si mentionnee)\n\n{transcript}"
+    )
 
 
 @mcp.tool()
