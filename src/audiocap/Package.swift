@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "audiocap",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.4")],
     targets: [
         .executableTarget(
             name: "audiocap",
