@@ -27,13 +27,29 @@ from .transcriber import _get_backend, transcribe_meeting
 
 mcp = FastMCP(
     "claude-meeting-mcp",
-    instructions=(
-        "Record meetings from any video conferencing app "
-        "(Google Meet, Teams, Zoom, Slack, Discord, etc.) "
-        "by capturing system audio + microphone. "
-        "Transcribe with Whisper locally or via a remote API. "
-        "Automatically generate meeting minutes (PV)."
-    ),
+    instructions="""\
+Meeting recording, transcription, and minutes generation.
+Works with any video conferencing app (Google Meet, Teams, Zoom, Slack, Discord).
+Respond in the user's language.
+
+WORKFLOW — match user intent to the right tool:
+- "record", "enregistre", "start" → meeting_record_start()
+- "stop", "c'est fini", "done", "arrete" → meeting_stop_and_transcribe()
+- "transcribe", "transcris" (existing file) → meeting_transcribe(file_path=...)
+- "meeting minutes", "PV", "proces-verbal", "summary" → generate_meeting_pv()
+- "actions", "todo", "to-do list" → extract_action_items prompt
+- "status", "ca marche?", "ready?" → meeting_status()
+- "settings", "config", "change model" → meeting_configure()
+- "list", "history", "past meetings" → recordings_list() / transcriptions_list() / pvs_list()
+- "cleanup", "delete old" → meeting_cleanup()
+
+PARAMETERS:
+- Always ask for participant names if not provided
+- remote_speakers = people on the call (system audio, left channel)
+- local_speakers = people in the room with the microphone (right channel)
+- Prefer meeting_stop_and_transcribe over separate stop + transcribe calls
+- After transcription, suggest generating meeting minutes
+""",
 )
 
 
