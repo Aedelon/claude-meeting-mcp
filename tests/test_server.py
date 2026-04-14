@@ -4,8 +4,8 @@ import sys
 from unittest.mock import MagicMock, patch
 
 
-def test_meeting_status_keys():
-    """Verify meeting_status returns all expected keys."""
+def test_audio_status_keys():
+    """Verify audio_status returns all expected keys."""
     with (
         patch("claude_meeting_mcp.server.get_capturer") as mock_capturer,
         patch("claude_meeting_mcp.server._get_backend", return_value="mlx"),
@@ -15,9 +15,9 @@ def test_meeting_status_keys():
         mock_cap.is_available.return_value = True
         mock_capturer.return_value = mock_cap
 
-        from claude_meeting_mcp.server import meeting_status
+        from claude_meeting_mcp.server import audio_status
 
-        result = meeting_status()
+        result = audio_status()
         assert "platform" in result
         assert "audio_capture_available" in result
         assert "audio_capture_backend" in result
@@ -28,25 +28,25 @@ def test_meeting_status_keys():
         assert result["transcription_backend"] == "mlx"
 
 
-def test_meeting_configure_valid_key():
-    """Verify meeting_configure updates config correctly."""
-    from claude_meeting_mcp.server import meeting_configure
+def test_audio_configure_valid_key():
+    """Verify audio_configure updates config correctly."""
+    from claude_meeting_mcp.server import audio_configure
 
     with patch("claude_meeting_mcp.server.update_config") as mock_update:
         from claude_meeting_mcp.config import Config
 
         mock_update.return_value = Config()
-        result = meeting_configure("whisper.model", "small")
+        result = audio_configure("whisper.model", "small")
         assert result["status"] == "updated"
 
 
-def test_meeting_configure_invalid_key():
-    """Verify meeting_configure returns error for invalid key."""
-    from claude_meeting_mcp.server import meeting_configure
+def test_audio_configure_invalid_key():
+    """Verify audio_configure returns error for invalid key."""
+    from claude_meeting_mcp.server import audio_configure
 
     with patch(
         "claude_meeting_mcp.server.update_config",
         side_effect=ValueError("Unknown config key: bad.key"),
     ):
-        result = meeting_configure("bad.key", "value")
+        result = audio_configure("bad.key", "value")
         assert "error" in result

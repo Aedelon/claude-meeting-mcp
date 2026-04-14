@@ -42,7 +42,7 @@ GREETING: When the user triggers this server, explain what it can do:
 It works by capturing your system audio + microphone."
 
 Then present these choices:
-1. Check server status (meeting_status)
+1. Check server status (audio_status)
 2. Configure settings (guided setup wizard)
 3. Start recording / transcribe / generate minutes
 Mention that configuration is optional — defaults work out of the box.
@@ -54,12 +54,12 @@ TRIGGERS: activate for meetings, recording, transcription, but ALSO for:
 - any request to record or transcribe system audio
 
 CONFIGURATION WIZARD: When user picks "configure", walk through step by step.
-Ask ONE question at a time, wait for answer, apply with meeting_configure, then next.
+Ask ONE question at a time, wait for answer, apply with audio_configure, then next.
 Step 1: "What language are your meetings in?" → transcription.language (fr, en, es, de, ja...)
 Step 2: "Transcription quality?" → fast (medium), balanced (large-v3-turbo), best (large-v3)
 Step 3: "Multiple speakers per side?" → diarization.enabled + ask backend (pyannote/whisperx)
 Step 4: "Auto-generate meeting minutes after transcription?" → pv.auto_generate (true/false)
-Step 5: "Local or remote transcription?" → if remote: set URL via meeting_configure.
+Step 5: "Local or remote transcription?" → if remote: set URL via audio_configure.
   NEVER ask for API keys or tokens in the conversation.
   Tell user: "Set TRANSCRIPTION_API_KEY in your env or Claude Desktop config (env section)."
   For HF_TOKEN (diarization): "Set HF_TOKEN in your env or Claude Desktop config."
@@ -70,13 +70,13 @@ WORKFLOW: record → stop+transcribe (ask participants) → suggest PV → sugge
 - Start recording immediately. Do NOT ask for participant names before recording.
 - Ask for participants only when stopping/transcribing.
 - remote_speakers = people on the call (left channel), local_speakers = at the mic (right channel).
-- Prefer meeting_stop_and_transcribe() over separate stop + transcribe.
-- After transcription, always suggest generating meeting minutes with generate_meeting_pv().
+- Prefer audio_stop_and_transcribe() over separate stop + transcribe.
+- After transcription, always suggest generating meeting minutes with audio_generate_pv().
 
 DISAMBIGUATION:
-- User wants to transcribe while recording is active → meeting_stop_and_transcribe()
-- User wants to transcribe with no active recording → meeting_transcribe() (suggest most recent)
-- User says stop/done/finished → meeting_stop_and_transcribe() (not just meeting_record_stop)
+- User wants to transcribe while recording is active → audio_stop_and_transcribe()
+- User wants to transcribe with no active recording → audio_transcribe() (suggest most recent)
+- User says stop/done/finished → audio_stop_and_transcribe() (not just audio_record_stop)
 """,
 )
 
@@ -96,11 +96,13 @@ def _validate_meeting_id(meeting_id: str) -> str | None:
 
 
 @mcp.tool()
-def meeting_status() -> dict:
-    """Check meeting server status and readiness.
+def audio_status() -> dict:
+    """Check audio server status and what it can do.
 
-    Returns platform, backends, config, recording state, disk space,
-    and most recent recording (for disambiguation).
+    Use this for: recording meetings, transcribing YouTube videos, podcasts,
+    music, lectures, interviews, or any audio from the computer.
+    Returns: platform, capture backend, transcription engine, config, disk space.
+    Call this first to verify everything is ready.
     """
     import shutil
 
@@ -131,33 +133,34 @@ def meeting_status() -> dict:
 
 
 @mcp.tool()
-def meeting_record_start() -> dict:
-    """Start recording system audio and microphone.
+def audio_record_start() -> dict:
+    """Start recording all audio from the computer + microphone.
 
-    Captures all audio from the computer (any app, YouTube, podcast, music, etc.)
-    plus the microphone into a stereo WAV file.
-    Left channel = system audio. Right channel = microphone.
+    Captures everything playing on the system: meetings (Meet, Teams, Zoom, Slack,
+    Discord), YouTube, podcasts, Spotify, lectures, interviews, any audio source.
+    Also records the microphone. Stereo WAV: left = system, right = mic.
     """
     result = start_recording()
     if "error" not in result:
-        result["next_step"] = "When done, call meeting_stop_and_transcribe()"
+        result["next_step"] = "When done, call audio_stop_and_transcribe()"
     return result
 
 
 @mcp.tool()
-def meeting_record_stop() -> dict:
-    """Stop the current recording and save the WAV file.
+def audio_record_stop() -> dict:
+    """Stop recording and save the audio file.
 
-    Use meeting_stop_and_transcribe() instead if you also want to transcribe.
+    Only stops — does not transcribe. Use audio_stop_and_transcribe() instead
+    to stop AND transcribe in one call (recommended).
     """
     result = stop_recording()
     if "error" not in result:
-        result["next_step"] = "Transcribe with meeting_transcribe(file_path=...)"
+        result["next_step"] = "Transcribe with audio_transcribe(file_path=...)"
     return result
 
 
 @mcp.tool()
-def meeting_transcribe(
+def audio_transcribe(
     file_path: Annotated[str, Field(description="Path to the WAV file to transcribe")],
     local_speakers: Annotated[
         str | None,
@@ -184,10 +187,11 @@ def meeting_transcribe(
         ),
     ] = None,
 ) -> dict:
-    """Transcribe an existing meeting WAV file.
+    """Transcribe an existing audio WAV file with AI (Whisper).
 
-    Splits stereo channels for speaker attribution.
-    If diarization is enabled, identifies individual speakers per channel.
+    Works on any audio: meetings, YouTube recordings, podcasts, lectures, etc.
+    Stereo files: splits channels for speaker attribution (left=system, right=mic).
+    With diarization enabled, identifies individual speakers within each channel.
     """
     local = local_speakers or "Local"
     remote = remote_speakers or "Remote"
@@ -198,12 +202,12 @@ def meeting_transcribe(
         "segment_count": len(result.segments),
         "output_file": str(TRANSCRIPTIONS_DIR / f"{result.meeting_id}.json"),
         "preview": [s.to_dict() for s in result.segments[:10]],
-        "next_step": f"Generate meeting minutes: generate_meeting_pv('{result.meeting_id}')",
+        "next_step": f"Generate meeting minutes: audio_generate_pv('{result.meeting_id}')",
     }
 
 
 @mcp.tool()
-def meeting_stop_and_transcribe(
+def audio_stop_and_transcribe(
     local_speakers: Annotated[
         str | None,
         Field(
@@ -223,17 +227,18 @@ def meeting_stop_and_transcribe(
         ),
     ] = None,
 ) -> dict:
-    """Stop the recording and transcribe it in one step.
+    """Stop recording and transcribe immediately — one call does both.
 
-    Preferred over calling meeting_record_stop + meeting_transcribe separately.
-    Single round-trip for the complete stop-and-transcribe pipeline.
+    This is the recommended way to finish a recording. Stops capture,
+    then transcribes the audio with Whisper. Returns transcription preview
+    and suggests generating meeting minutes as next step.
     """
     stop_result = stop_recording()
     if "error" in stop_result:
         return stop_result
 
     file_path = stop_result["file"]
-    return meeting_transcribe(file_path, local_speakers, remote_speakers, model)
+    return audio_transcribe(file_path, local_speakers, remote_speakers, model)
 
 
 # --- Retrieval ---
@@ -243,7 +248,7 @@ def meeting_stop_and_transcribe(
 def get_transcription(
     meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
 ) -> dict:
-    """Retrieve a past transcription by meeting ID."""
+    """Retrieve a past transcription. Returns full text with timestamps and speakers."""
     if err := _validate_meeting_id(meeting_id):
         return {"error": err}
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
@@ -257,7 +262,7 @@ def get_transcription(
 def get_pv(
     meeting_id: Annotated[str, Field(description="Meeting identifier")],
 ) -> dict:
-    """Retrieve a previously generated meeting minutes (PV)."""
+    """Retrieve previously generated meeting minutes (PV) as markdown."""
     if err := _validate_meeting_id(meeting_id):
         return {"error": err}
     pv_path = PV_DIR / f"{meeting_id}_pv.md"
@@ -272,19 +277,19 @@ def get_pv(
 
 @mcp.tool()
 def recordings_list() -> list[dict]:
-    """List all available audio recordings with size and date."""
+    """List all audio recordings with meeting_id, file size, and date."""
     return list_recordings()
 
 
 @mcp.tool()
 def transcriptions_list() -> list[dict]:
-    """List all available transcriptions with date."""
+    """List all transcriptions with meeting_id and date. Use meeting_id with get_transcription."""
     return list_transcriptions()
 
 
 @mcp.tool()
 def pvs_list() -> list[dict]:
-    """List all available meeting minutes (PV) files."""
+    """List all meeting minutes (PV) with meeting_id and date. Use meeting_id with get_pv."""
     return list_pvs()
 
 
@@ -292,7 +297,7 @@ def pvs_list() -> list[dict]:
 
 
 @mcp.tool()
-async def generate_meeting_pv(
+async def audio_generate_pv(
     ctx: Context,
     meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
     participants: Annotated[
@@ -305,12 +310,12 @@ async def generate_meeting_pv(
         ),
     ] = None,
 ) -> dict:
-    """Generate meeting minutes (PV) from a transcription using AI.
+    """Generate structured meeting minutes (PV) from a transcription using AI.
 
-    Uses MCP Sampling: the server asks Claude to analyze the transcription,
-    identify speakers by their conversation content, and produce structured
-    meeting minutes with decisions, action items, and speaker attribution.
-    For meetings under 1h: single pass. For longer: map-reduce strategy.
+    Produces a markdown document with: date, participants (identified by what
+    they said), topics discussed, decisions made, and action items.
+    Claude identifies who said what based on conversation content.
+    Short recordings (<1h): single pass. Longer: automatic map-reduce.
     """
     if err := _validate_meeting_id(meeting_id):
         return {"error": err}
@@ -350,7 +355,7 @@ async def generate_meeting_pv(
 
 
 @mcp.tool()
-def meeting_configure(
+def audio_configure(
     key: Annotated[
         str,
         Field(
@@ -364,13 +369,14 @@ def meeting_configure(
     ],
     value: Annotated[str, Field(description="New value for the config key")],
 ) -> dict:
-    """Modify a claude-meeting-mcp configuration parameter.
+    """Change a server setting (language, model, diarization, remote API, etc.).
 
-    Common operations:
-    - Change transcription model: key='transcription.model', value='small'
-    - Enable diarization: key='diarization.enabled', value='true'
-    - Switch to remote API: key='transcription.mode', value='remote'
-    - Set remote API URL: key='transcription.remote.url', value='https://api.groq.com/...'
+    Examples:
+    - Language: key='transcription.language', value='fr'
+    - Model: key='transcription.model', value='large-v3-turbo'
+    - Diarization: key='diarization.enabled', value='true'
+    - Remote API: key='transcription.mode', value='remote'
+    - API URL: key='transcription.remote.url', value='https://api.groq.com/...'
     """
     try:
         config = update_config(key, value)
@@ -383,10 +389,11 @@ def meeting_configure(
 
 
 @mcp.tool()
-def meeting_cleanup() -> dict:
-    """Remove meeting audio recordings older than 30 days.
+def audio_cleanup() -> dict:
+    """Delete audio recordings older than 30 days to free disk space.
 
-    Transcriptions and PVs are kept indefinitely.
+    Only removes WAV files. Transcriptions and meeting minutes are kept forever.
+    Also runs automatically on server startup.
     """
     removed = cleanup_old_recordings()
     return {"removed_count": len(removed), "removed_files": removed}
