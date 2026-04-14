@@ -1,8 +1,8 @@
 # claude-meeting-mcp
 
-An MCP server that records your meetings, transcribes them with AI, identifies who said what, and generates structured meeting minutes — all automatically.
+An MCP server that records and transcribes any audio — meetings, YouTube videos, podcasts, lectures, interviews, music — with speaker identification and automatic meeting minutes.
 
-Works with **any video conferencing app** (Google Meet, Teams, Zoom, Slack, Discord, etc.) on **macOS, Windows, and Linux**.
+Works with **any audio source** on **macOS, Windows, and Linux**.
 
 ---
 
@@ -10,12 +10,13 @@ Works with **any video conferencing app** (Google Meet, Teams, Zoom, Slack, Disc
 
 This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server. MCP is an open standard that lets AI assistants like Claude use external tools. Once you install this server, Claude can:
 
-1. **Record** your meetings (system audio + microphone)
-2. **Transcribe** the recording using Whisper AI (locally on your machine)
+1. **Record** any audio from your computer (meetings, YouTube, podcasts, etc.) + microphone
+2. **Transcribe** the recording using Whisper AI (locally or via remote API)
 3. **Identify speakers** using pyannote diarization
-4. **Generate meeting minutes** (PV) with decisions, action items, and speaker attribution
+4. **Generate meeting minutes** with decisions, action items, and speaker attribution
+5. **Extract text** from any video or audio playing on your computer
 
-You just talk to Claude naturally: *"Record my meeting"*, *"Stop and transcribe"*, *"Generate the minutes"*.
+You just talk to Claude naturally: *"Record my meeting"*, *"Transcribe this YouTube video"*, *"Generate the minutes"*.
 
 ---
 
