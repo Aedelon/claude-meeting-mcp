@@ -1,10 +1,14 @@
 """MCP Server exposing meeting recording and transcription tools."""
 
+from __future__ import annotations
+
 import json
 import sys
+from typing import Annotated
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ClientCapabilities, SamplingCapability
+from pydantic import Field
 
 from .capture import get_capturer
 from .config import get_config, update_config, validate_config
@@ -33,6 +37,9 @@ mcp = FastMCP(
 )
 
 
+# --- Recording & Transcription ---
+
+
 @mcp.tool()
 def meeting_status() -> dict:
     """Check meeting server status: platform, audio capture backend, transcription backend."""
@@ -45,6 +52,7 @@ def meeting_status() -> dict:
         "transcription_backend": _get_backend(),
         "whisper_model": config.whisper.model,
         "whisper_mode": config.whisper.mode,
+        "diarization_enabled": config.diarization.enabled,
         "currently_recording": is_recording(),
     }
 
@@ -66,23 +74,25 @@ def meeting_record_stop() -> dict:
 
 @mcp.tool()
 def meeting_transcribe(
-    file_path: str,
-    local_speakers: str | None = None,
-    remote_speakers: str | None = None,
-    model: str | None = None,
+    file_path: Annotated[str, Field(description="Path to the WAV file to transcribe")],
+    local_speakers: Annotated[
+        str | None,
+        Field(description="Comma-separated names of people at the mic (right channel)"),
+    ] = None,
+    remote_speakers: Annotated[
+        str | None,
+        Field(description="Comma-separated names of people on the call (left channel)"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
+    ] = None,
 ) -> dict:
     """Transcribe a recorded meeting WAV file.
 
-    Splits stereo channels: left = remote (system audio), right = local (mic).
-    Speaker names are per-meeting, passed as comma-separated strings.
-
-    Args:
-        file_path: Path to the WAV file to transcribe
-        local_speakers: Comma-separated names of people at the mic (right channel)
-        remote_speakers: Comma-separated names of people on the call (left channel)
-        model: Whisper model override (default from config)
+    Splits stereo channels for automatic speaker attribution.
+    Uses the configured Whisper backend (MLX on macOS, faster-whisper elsewhere).
     """
-    # Default names if not provided
     local = local_speakers or "Local"
     remote = remote_speakers or "Remote"
     result = transcribe_meeting(file_path, remote, local, model)
@@ -96,17 +106,60 @@ def meeting_transcribe(
 
 
 @mcp.tool()
-def get_transcription(meeting_id: str) -> dict:
-    """Retrieve a past transcription by meeting ID.
+def meeting_stop_and_transcribe(
+    local_speakers: Annotated[
+        str | None,
+        Field(description="Comma-separated names of people at the mic"),
+    ] = None,
+    remote_speakers: Annotated[
+        str | None,
+        Field(description="Comma-separated names of people on the call"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
+    ] = None,
+) -> dict:
+    """Stop a running recording and transcribe it in one step.
 
-    Args:
-        meeting_id: The meeting identifier (filename without .json extension)
+    More efficient than calling meeting_record_stop + meeting_transcribe separately.
     """
+    stop_result = stop_recording()
+    if "error" in stop_result:
+        return stop_result
+
+    file_path = stop_result["file"]
+    return meeting_transcribe(file_path, local_speakers, remote_speakers, model)
+
+
+# --- Retrieval ---
+
+
+@mcp.tool()
+def get_transcription(
+    meeting_id: Annotated[str, "Meeting identifier (filename without .json)"],
+) -> dict:
+    """Retrieve a past transcription by meeting ID."""
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return {"error": f"Transcription not found: {meeting_id}"}
     t = Transcription.from_json(path.read_text(encoding="utf-8"))
     return t.to_dict()
+
+
+@mcp.tool()
+def get_pv(
+    meeting_id: Annotated[str, "Meeting identifier"],
+) -> dict:
+    """Retrieve a previously generated meeting minutes (PV)."""
+    pv_path = PV_DIR / f"{meeting_id}_pv.md"
+    if not pv_path.exists():
+        return {"error": f"PV not found for meeting: {meeting_id}"}
+    return {
+        "meeting_id": meeting_id,
+        "pv_file": str(pv_path),
+        "content": pv_path.read_text(encoding="utf-8"),
+    }
 
 
 @mcp.tool()
@@ -127,70 +180,38 @@ def pvs_list() -> list[dict]:
     return list_pvs()
 
 
-@mcp.tool()
-def meeting_stop_and_transcribe(
-    local_speakers: str | None = None,
-    remote_speakers: str | None = None,
-    model: str | None = None,
-) -> dict:
-    """Stop a running recording and transcribe it in one step.
-
-    More efficient than calling meeting_record_stop + meeting_transcribe separately.
-    Single round-trip for the complete stop → transcribe pipeline.
-
-    Args:
-        local_speakers: Comma-separated names of people at the mic
-        remote_speakers: Comma-separated names of people on the call
-        model: Whisper model override (default from config)
-    """
-    stop_result = stop_recording()
-    if "error" in stop_result:
-        return stop_result
-
-    file_path = stop_result["file"]
-    return meeting_transcribe(file_path, local_speakers, remote_speakers, model)
-
-
-@mcp.tool()
-def meeting_cleanup() -> dict:
-    """Remove meeting audio recordings older than 30 days."""
-    removed = cleanup_old_recordings()
-    return {"removed_count": len(removed), "removed_files": removed}
+# --- PV Generation ---
 
 
 @mcp.tool()
 async def generate_meeting_pv(
     ctx: Context,
-    meeting_id: str,
-    participants: str | None = None,
+    meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
+    participants: Annotated[
+        str | None,
+        Field(description="Comma-separated names of known participants (helps identify speakers)"),
+    ] = None,
 ) -> dict:
-    """Generate a meeting minutes (PV) from a transcription using AI.
+    """Generate meeting minutes (PV) from a transcription using AI.
 
-    The PV is generated automatically via MCP Sampling (server asks Claude to summarize).
-    Claude identifies who is who based on conversation content and the participant list.
-
-    Args:
-        meeting_id: The meeting identifier (filename without .json extension)
-        participants: Comma-separated names of known participants (helps Claude identify speakers)
+    Uses MCP Sampling: the server asks Claude to summarize the transcription.
+    Claude identifies who is who based on conversation content and participant names.
+    For meetings under 1h: single pass. For longer meetings: map-reduce strategy.
     """
-    # Load transcription
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return {"error": f"Transcription not found: {meeting_id}"}
 
     transcription = Transcription.from_json(path.read_text(encoding="utf-8"))
 
-    # Check if client supports sampling
     if not ctx.session.check_client_capability(ClientCapabilities(sampling=SamplingCapability())):
         return {
             "error": "Client does not support MCP Sampling. "
             "Generate PV manually by reading the transcription."
         }
 
-    # Parse known participants
     known = [n.strip() for n in participants.split(",")] if participants else None
 
-    # Generate PV
     pv_text = await generate_pv(ctx, transcription, known)
     pv_path = save_pv(meeting_id, pv_text)
 
@@ -202,21 +223,33 @@ async def generate_meeting_pv(
     }
 
 
-@mcp.tool()
-def get_pv(meeting_id: str) -> dict:
-    """Retrieve a previously generated meeting minutes (PV).
+# --- Configuration ---
 
-    Args:
-        meeting_id: The meeting identifier
-    """
-    pv_path = PV_DIR / f"{meeting_id}_pv.md"
-    if not pv_path.exists():
-        return {"error": f"PV not found for meeting: {meeting_id}"}
-    return {
-        "meeting_id": meeting_id,
-        "pv_file": str(pv_path),
-        "content": pv_path.read_text(encoding="utf-8"),
-    }
+
+@mcp.tool()
+def meeting_configure(
+    key: Annotated[
+        str,
+        Field(description="Config key: whisper.model, whisper.mode, diarization.*"),
+    ],
+    value: Annotated[str, Field(description="New value for the config key")],
+) -> dict:
+    """Modify a claude-meeting-mcp configuration parameter."""
+    try:
+        config = update_config(key, value)
+        errors = validate_config(config)
+        if errors:
+            return {"status": "warning", "key": key, "value": value, "warnings": errors}
+        return {"status": "updated", "key": key, "value": value}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def meeting_cleanup() -> dict:
+    """Remove meeting audio recordings older than 30 days."""
+    removed = cleanup_old_recordings()
+    return {"removed_count": len(removed), "removed_files": removed}
 
 
 # --- MCP Resources ---
@@ -246,11 +279,7 @@ def pv_resource(meeting_id: str) -> str:
 
 @mcp.prompt()
 def regenerate_pv(meeting_id: str) -> str:
-    """Regenerate a PV with custom instructions.
-
-    Args:
-        meeting_id: The meeting to regenerate PV for
-    """
+    """Regenerate a PV with custom instructions."""
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return f"Transcription not found: {meeting_id}"
@@ -264,11 +293,7 @@ def regenerate_pv(meeting_id: str) -> str:
 
 @mcp.prompt()
 def extract_action_items(meeting_id: str) -> str:
-    """Extract only action items from a meeting.
-
-    Args:
-        meeting_id: The meeting to extract actions from
-    """
+    """Extract only action items from a meeting."""
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return f"Transcription not found: {meeting_id}"
@@ -278,24 +303,6 @@ def extract_action_items(meeting_id: str) -> str:
         f"Extrais uniquement les actions decidees dans cette reunion. "
         f"Format : - [ ] Action (responsable, deadline si mentionnee)\n\n{transcript}"
     )
-
-
-@mcp.tool()
-def meeting_configure(key: str, value: str) -> dict:
-    """Modify a claude-meeting-mcp configuration parameter.
-
-    Args:
-        key: Config key (e.g., 'whisper.model', 'diarization.enabled', 'diarization.backend')
-        value: New value
-    """
-    try:
-        config = update_config(key, value)
-        errors = validate_config(config)
-        if errors:
-            return {"status": "warning", "key": key, "value": value, "warnings": errors}
-        return {"status": "updated", "key": key, "value": value}
-    except ValueError as e:
-        return {"error": str(e)}
 
 
 def main():
