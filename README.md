@@ -352,11 +352,27 @@ Then tell Claude: *"Enable diarization"*
 
 ## Multilingual Support
 
-The server supports 8 languages for interaction with Claude:
+**Interaction with Claude**: works in any language. Claude understands your intent regardless of the language you speak. No configuration needed.
 
-English, French, Spanish, Italian, Portuguese, Russian, Chinese, Hebrew
+**Transcription**: Whisper supports [99 languages](https://github.com/openai/whisper#available-models-and-languages). Set the language in config to improve accuracy:
 
-Claude responds in whatever language you use. Meeting minutes are generated in the same language as the transcription. The transcription language is configurable (`transcription.language`).
+| Code | Language | Code | Language | Code | Language |
+|------|----------|------|----------|------|----------|
+| `en` | English | `fr` | French | `es` | Spanish |
+| `de` | German | `it` | Italian | `pt` | Portuguese |
+| `ru` | Russian | `zh` | Chinese | `ja` | Japanese |
+| `ko` | Korean | `ar` | Arabic | `nl` | Dutch |
+| `pl` | Polish | `tr` | Turkish | `he` | Hebrew |
+| `uk` | Ukrainian | `hi` | Hindi | `sv` | Swedish |
+
+Full list: [openai/whisper — supported languages](https://github.com/openai/whisper#available-models-and-languages)
+
+```
+meeting_configure("transcription.language", "fr")   # French meeting
+meeting_configure("transcription.language", "ja")   # Japanese meeting
+```
+
+**Meeting minutes**: generated in the same language as the transcription. If the meeting is in French, the PV will be in French.
 
 ---
 
