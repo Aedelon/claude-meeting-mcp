@@ -63,13 +63,24 @@ def _validate_meeting_id(meeting_id: str) -> str | None:
 
 @mcp.tool()
 def meeting_status() -> dict:
-    """Check meeting server status.
+    """Check meeting server status and readiness.
 
-    Returns platform, audio capture backend, transcription backend,
-    Whisper model, diarization state, and recording state.
+    Returns platform, backends, config, recording state, disk space,
+    and most recent recording (for disambiguation).
     """
+    import shutil
+
     capturer = get_capturer()
     config = get_config()
+
+    # Disk space
+    disk = shutil.disk_usage(TRANSCRIPTIONS_DIR)
+    disk_free_gb = round(disk.free / (1024**3), 1)
+
+    # Last recording for disambiguation
+    recs = list_recordings()
+    last_recording = recs[0]["meeting_id"] if recs else None
+
     return {
         "platform": sys.platform,
         "audio_capture_available": capturer.is_available(),
@@ -77,8 +88,11 @@ def meeting_status() -> dict:
         "transcription_backend": _get_backend(),
         "whisper_model": config.whisper.model,
         "whisper_mode": config.whisper.mode,
+        "whisper_language": config.whisper.language,
         "diarization_enabled": config.diarization.enabled,
         "currently_recording": is_recording(),
+        "disk_free_gb": disk_free_gb,
+        "last_recording": last_recording,
     }
 
 
