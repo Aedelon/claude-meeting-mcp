@@ -164,23 +164,29 @@ def merge_segments(
     left_speaker: str,
     right_speaker: str,
 ) -> list[Segment]:
-    """Merge two channel transcriptions into a single timeline sorted by start time."""
+    """Merge two channel transcriptions into a single timeline sorted by start time.
+
+    If segments already have a "speaker" key (from diarization), it is used.
+    Otherwise, left_speaker/right_speaker is applied as fallback.
+    """
     segments = []
     for seg in left_segments:
+        speaker = seg.get("speaker") or left_speaker
         segments.append(
             Segment(
                 start=round(seg["start"], 2),
                 end=round(seg["end"], 2),
-                speaker=left_speaker,
+                speaker=speaker,
                 text=seg["text"].strip(),
             )
         )
     for seg in right_segments:
+        speaker = seg.get("speaker") or right_speaker
         segments.append(
             Segment(
                 start=round(seg["start"], 2),
                 end=round(seg["end"], 2),
-                speaker=right_speaker,
+                speaker=speaker,
                 text=seg["text"].strip(),
             )
         )
@@ -198,26 +204,44 @@ def _save_channel_temp(audio: np.ndarray, samplerate: int, suffix: str) -> str:
     return tmp.name
 
 
+def _diarize_and_assign(
+    audio: np.ndarray,
+    samplerate: int,
+    whisper_segments: list[dict],
+    speaker_names: list[str],
+    channel_prefix: str,
+) -> list[dict]:
+    """Run diarization on a channel and assign speakers to Whisper segments."""
+    from .diarize import assign_speakers_to_segments, diarize_channel
+
+    diar_segments = diarize_channel(audio, samplerate)
+    return assign_speakers_to_segments(
+        whisper_segments, diar_segments, speaker_names, channel_prefix
+    )
+
+
 def transcribe_meeting(
     wav_path: str,
-    left_speaker: str | None = None,
-    right_speaker: str | None = None,
+    remote_speakers: str | None = None,
+    local_speakers: str | None = None,
     model: str | None = None,
 ) -> Transcription:
     """Full transcription pipeline: split channels, transcribe each, merge.
 
     Args:
         wav_path: Path to the stereo WAV file
-        left_speaker: Name for system audio speaker (default from config)
-        right_speaker: Name for microphone speaker (default from config)
+        remote_speakers: Comma-separated names for system audio (left channel)
+        local_speakers: Comma-separated names for microphone (right channel)
         model: Whisper model override (default from config)
     """
     ensure_dirs()
     config = get_config()
     wav = Path(wav_path)
 
-    left_speaker = left_speaker or config.recording.left_speaker
-    right_speaker = right_speaker or config.recording.right_speaker
+    remote_label = remote_speakers or "Remote"
+    local_label = local_speakers or "Local"
+    remote_names = [n.strip() for n in remote_label.split(",")]
+    local_names = [n.strip() for n in local_label.split(",")]
 
     left_audio, right_audio, samplerate = split_channels(wav_path)
     duration = len(left_audio) / samplerate
@@ -225,7 +249,6 @@ def transcribe_meeting(
     backend = _get_backend()
 
     if backend == "remote":
-        # Remote: save channels as temp files and send to API
         left_tmp = _save_channel_temp(left_audio, samplerate, "left")
         right_tmp = _save_channel_temp(right_audio, samplerate, "right")
         try:
@@ -238,14 +261,28 @@ def transcribe_meeting(
         left_segments = transcribe_channel(left_audio, samplerate, model)
         right_segments = transcribe_channel(right_audio, samplerate, model)
 
-    segments = merge_segments(left_segments, right_segments, left_speaker, right_speaker)
+    # Apply diarization if enabled
+    if config.diarization.enabled:
+        left_segments = _diarize_and_assign(
+            left_audio, samplerate, left_segments, remote_names, "remote"
+        )
+        right_segments = _diarize_and_assign(
+            right_audio, samplerate, right_segments, local_names, "local"
+        )
+        segments = merge_segments(left_segments, right_segments, "", "")
+    else:
+        segments = merge_segments(left_segments, right_segments, remote_label, local_label)
+
+    # Collect all unique speaker names
+    all_speakers = sorted(set(s.speaker for s in segments))
+    speakers_dict = {f"speaker_{i}": name for i, name in enumerate(all_speakers)}
 
     meeting_id = wav.stem
     transcription = Transcription(
         meeting_id=meeting_id,
         date=meeting_id[:10] if len(meeting_id) >= 10 else "",
         duration_seconds=round(duration, 1),
-        speakers={"left": left_speaker, "right": right_speaker},
+        speakers=speakers_dict,
         segments=segments,
     )
 
@@ -259,15 +296,15 @@ def transcribe_meeting(
 def cli():
     """CLI entry point for manual transcription."""
     if len(sys.argv) < 2:
-        print("Usage: transcribe <path_to_wav> [left_speaker] [right_speaker] [model]")
+        print("Usage: transcribe <path_to_wav> [remote_speakers] [local_speakers] [model]")
         sys.exit(1)
 
     wav_path = sys.argv[1]
-    left = sys.argv[2] if len(sys.argv) > 2 else None
-    right = sys.argv[3] if len(sys.argv) > 3 else None
+    remote = sys.argv[2] if len(sys.argv) > 2 else None
+    local = sys.argv[3] if len(sys.argv) > 3 else None
     model = sys.argv[4] if len(sys.argv) > 4 else None
 
     print(f"Transcribing {wav_path} (backend: {_get_backend()})...")
-    result = transcribe_meeting(wav_path, left, right, model)
+    result = transcribe_meeting(wav_path, remote, local, model)
     print(f"Done. {len(result.segments)} segments, {result.duration_seconds}s")
     print(f"Saved to: transcriptions/{result.meeting_id}.json")
