@@ -43,9 +43,13 @@ Step 1: "What language are your meetings in?" → transcription.language (fr, en
 Step 2: "Transcription quality?" → fast (medium), balanced (large-v3-turbo), best (large-v3)
 Step 3: "Multiple speakers per side?" → diarization.enabled + ask backend (pyannote/whisperx)
 Step 4: "Auto-generate meeting minutes after transcription?" → pv.auto_generate (true/false)
-Step 5: "Local or remote transcription?" → if remote: ask for API URL only.
-  SECURITY: Never ask for API keys in the chat. Tell the user to set the env var themselves:
-  "Set your API key: export TRANSCRIPTION_API_KEY=your-key-here"
+Step 5: "Local or remote transcription?" → if remote: ask for API URL, then guide for API key.
+  API KEY SETUP (never ask the key in the chat — it would be sent to Anthropic servers):
+  Guide the user to add it in Claude Desktop config (Settings > Developer > Edit Config):
+  "Add this to your mcpServers > claude-meeting-mcp section:
+   \"env\": { \"TRANSCRIPTION_API_KEY\": \"your-key-here\" }
+   then restart Claude Desktop."
+  For HF_TOKEN (diarization), same approach: add to env in the config.
 After each step, confirm and ask "Next setting, or all done?"
 Show final config summary at the end.
 
