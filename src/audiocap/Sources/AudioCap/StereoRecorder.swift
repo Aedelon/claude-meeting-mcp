@@ -26,6 +26,25 @@ final class StereoRecorder {
     private let sampleRate: Double
     private let systemChannels: Int
 
+    // Audio processing chain: normalize → compress → limit
+    // Normalization: running RMS per channel, gain to target level
+    private var systemRMS: Float = 0.0
+    private var micRMS: Float = 0.0
+    private let rmsSmoothing: Float = 0.05
+    private let maxGain: Float = 20.0
+    private let targetRMS: Float = 0.1       // ~-20dB
+
+    // Compressor: reduces dynamic range for consistent speech levels
+    private let compThreshold: Float = 0.15  // ~-16dB — compress above this
+    private let compRatio: Float = 4.0       // 4:1 ratio
+    private var sysEnvelope: Float = 0.0     // envelope follower state
+    private var micEnvelope: Float = 0.0
+    private let attackCoeff: Float           // computed from sample rate
+    private let releaseCoeff: Float
+
+    // Limiter: hard ceiling to prevent clipping
+    private let limiterCeiling: Float = 0.95 // ~-0.5dB
+
     init(
         aggregateID: AudioObjectID,
         outputPath: String,
@@ -42,11 +61,25 @@ final class StereoRecorder {
         self.systemRing = RingBuffer(capacity: sysCapacity)
         self.micRing = RingBuffer(capacity: micCapacity)
 
-        // Find default input device
+        // Compressor envelope coefficients (attack 5ms, release 100ms)
+        self.attackCoeff = expf(-1.0 / (Float(sampleRate) * 0.005))
+        self.releaseCoeff = expf(-1.0 / (Float(sampleRate) * 0.100))
+
+        // Find default input device and match sample rate to system
         self.micDeviceID = try StereoRecorder.getDefaultInputDevice()
-        let micSR = StereoRecorder.getDeviceSampleRate(micDeviceID)
+        let micSR = StereoRecorder.getDeviceSampleRate(micDeviceID) ?? 0
         fputs("audiocap: System: \(sampleRate) Hz, \(systemChannels) ch\n", stderr)
-        fputs("audiocap: Mic device: \(micDeviceID), \(micSR ?? 0) Hz\n", stderr)
+        fputs("audiocap: Mic device: \(micDeviceID), native \(micSR) Hz\n", stderr)
+
+        if micSR != sampleRate {
+            let set = StereoRecorder.setDeviceSampleRate(micDeviceID, rate: sampleRate)
+            if set {
+                let newSR = StereoRecorder.getDeviceSampleRate(micDeviceID) ?? 0
+                fputs("audiocap: Mic resampled to \(newSR) Hz\n", stderr)
+            } else {
+                fputs("audiocap: WARNING: Could not set mic to \(sampleRate) Hz, audio may drift\n", stderr)
+            }
+        }
 
         // Create WAV: stereo 16-bit at tap sample rate
         let settings: [String: Any] = [
@@ -220,20 +253,49 @@ final class StereoRecorder {
             let leftCh = channelData[0]
             let rightCh = channelData[1]
 
-            for f in 0..<frameCount {
-                // Left: system audio (mono mixdown if stereo source)
-                if systemChannels >= 2 {
-                    leftCh[f] = (sysPtr[f * systemChannels] + sysPtr[f * systemChannels + 1]) * 0.5
-                } else {
-                    leftCh[f] = sysPtr[f]
-                }
+            // === Step 1: Extract raw samples ===
+            var sysSum: Float = 0.0
+            var micSum: Float = 0.0
 
-                // Right: mic (silence if we ran out of mic data)
-                if f < micFrames {
-                    rightCh[f] = micPtr[f]
+            for f in 0..<frameCount {
+                let sysVal: Float
+                if systemChannels >= 2 {
+                    sysVal = (sysPtr[f * systemChannels] + sysPtr[f * systemChannels + 1]) * 0.5
                 } else {
-                    rightCh[f] = 0.0
+                    sysVal = sysPtr[f]
                 }
+                leftCh[f] = sysVal
+                sysSum += sysVal * sysVal
+
+                let micVal: Float = f < micFrames ? micPtr[f] : 0.0
+                rightCh[f] = micVal
+                micSum += micVal * micVal
+            }
+
+            // === Step 2: Normalize — bring both channels to target RMS ===
+            let chunkSysRMS = sqrtf(sysSum / Float(max(frameCount, 1)))
+            let chunkMicRMS = sqrtf(micSum / Float(max(micFrames, 1)))
+            systemRMS += (chunkSysRMS - systemRMS) * rmsSmoothing
+            micRMS += (chunkMicRMS - micRMS) * rmsSmoothing
+
+            let sysGain = systemRMS > 0.001 ? min(targetRMS / systemRMS, maxGain) : 1.0
+            let micGain = micRMS > 0.001 ? min(targetRMS / micRMS, maxGain) : 1.0
+
+            for f in 0..<frameCount {
+                leftCh[f] *= sysGain
+                rightCh[f] *= micGain
+            }
+
+            // === Step 3: Compress — reduce dynamic range (4:1 above threshold) ===
+            for f in 0..<frameCount {
+                leftCh[f] = compressSample(leftCh[f], envelope: &sysEnvelope)
+                rightCh[f] = compressSample(rightCh[f], envelope: &micEnvelope)
+            }
+
+            // === Step 4: Limit — hard ceiling at -0.5dB ===
+            for f in 0..<frameCount {
+                leftCh[f] = max(-limiterCeiling, min(limiterCeiling, leftCh[f]))
+                rightCh[f] = max(-limiterCeiling, min(limiterCeiling, rightCh[f]))
             }
 
             do {
@@ -245,6 +307,31 @@ final class StereoRecorder {
 
             sysRemaining -= sysRead
         }
+    }
+
+    // MARK: - Audio Processing
+
+    /// Soft-knee compressor: 4:1 ratio above threshold, with envelope follower.
+    private func compressSample(_ sample: Float, envelope: inout Float) -> Float {
+        let absSample = abs(sample)
+
+        // Envelope follower (fast attack, slow release)
+        if absSample > envelope {
+            envelope = attackCoeff * envelope + (1.0 - attackCoeff) * absSample
+        } else {
+            envelope = releaseCoeff * envelope + (1.0 - releaseCoeff) * absSample
+        }
+
+        // Compute gain reduction
+        if envelope > compThreshold {
+            let overDB = 20.0 * log10f(envelope / compThreshold)
+            let reducedDB = overDB / compRatio
+            let targetLevel = compThreshold * powf(10.0, reducedDB / 20.0)
+            let gain = targetLevel / envelope
+            return sample * gain
+        }
+
+        return sample
     }
 
     // MARK: - Helpers
@@ -276,5 +363,19 @@ final class StereoRecorder {
         )
         let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate)
         return status == noErr ? rate : nil
+    }
+
+    /// Set the nominal sample rate on a device. Core Audio HAL handles resampling internally.
+    @discardableResult
+    private static func setDeviceSampleRate(_ deviceID: AudioObjectID, rate: Double) -> Bool {
+        var newRate: Float64 = rate
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let size = UInt32(MemoryLayout<Float64>.size)
+        let status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &newRate)
+        return status == noErr
     }
 }
