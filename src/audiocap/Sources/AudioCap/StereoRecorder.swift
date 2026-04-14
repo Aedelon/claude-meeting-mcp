@@ -69,12 +69,15 @@ final class StereoRecorder {
             &procID
         )
         guard status == noErr, let procID = procID else {
+            fputs("audiocap: IOProc creation failed: \(status)\n", stderr)
             throw AudioCapError.ioProcFailed(status)
         }
         self.ioProcID = procID
+        fputs("audiocap: IOProc created on aggregate device \(aggregateID)\n", stderr)
 
         // Start the device
         let startStatus = AudioDeviceStart(aggregateID, procID)
+        fputs("audiocap: AudioDeviceStart returned: \(startStatus)\n", stderr)
         guard startStatus == noErr else {
             throw AudioCapError.deviceStartFailed(startStatus)
         }

@@ -20,12 +20,17 @@ final class AudioTapManager {
             throw AudioCapError.tapCreationFailed(tapStatus)
         }
         self.tapID = tapObjectID
+        fputs("audiocap: Tap created (ID: \(tapID))\n", stderr)
 
         // Read the tap's UID
         let tapUID = try getStringProperty(
             objectID: tapID,
             selector: kAudioTapPropertyUID
         )
+        fputs("audiocap: Tap UID: \(tapUID)\n", stderr)
+
+        // Read the tap's format
+        debugTapFormat()
 
         // Step 2: Get the default input device (microphone) UID
         let micDeviceID = try getDefaultInputDevice()
@@ -33,21 +38,22 @@ final class AudioTapManager {
             objectID: micDeviceID,
             selector: kAudioDevicePropertyDeviceUID
         )
+        fputs("audiocap: Mic device ID: \(micDeviceID), UID: \(micUID)\n", stderr)
 
         // Step 3: Create aggregate device combining tap + mic
         let aggregateUID = UUID().uuidString
         let aggregateDescription: [String: Any] = [
-            kAudioAggregateDeviceNameKey as String: "audiocap" as CFString,
-            kAudioAggregateDeviceUIDKey as String: aggregateUID as CFString,
-            kAudioAggregateDeviceIsPrivateKey as String: true,
+            kAudioAggregateDeviceNameKey as String: "audiocap",
+            kAudioAggregateDeviceUIDKey as String: aggregateUID,
+            kAudioAggregateDeviceIsPrivateKey as String: 1,
             kAudioAggregateDeviceSubDeviceListKey as String: [micUID],
             kAudioAggregateDeviceTapListKey as String: [[
                 kAudioSubTapUIDKey as String: tapUID,
-                kAudioSubTapDriftCompensationKey as String: true,
             ] as [String: Any]],
-            kAudioAggregateDeviceTapAutoStartKey as String: true,
+            kAudioAggregateDeviceTapAutoStartKey as String: 1,
         ]
 
+        fputs("audiocap: Creating aggregate device...\n", stderr)
         var aggregateObjectID: AudioObjectID = kAudioObjectUnknown
         let aggStatus = AudioHardwareCreateAggregateDevice(
             aggregateDescription as CFDictionary,
@@ -57,6 +63,10 @@ final class AudioTapManager {
             throw AudioCapError.aggregateCreationFailed(aggStatus)
         }
         self.aggregateID = aggregateObjectID
+        fputs("audiocap: Aggregate device created (ID: \(aggregateID))\n", stderr)
+
+        // Debug: check streams on aggregate
+        debugAggregateStreams()
     }
 
     /// Destroy the aggregate device and tap. Call during shutdown.
@@ -73,6 +83,59 @@ final class AudioTapManager {
 
     deinit {
         destroy()
+    }
+
+    // MARK: - Debug
+
+    private func debugTapFormat() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, &format)
+        if status == noErr {
+            fputs("audiocap: Tap format: \(format.mSampleRate) Hz, \(format.mChannelsPerFrame) ch, \(format.mBitsPerChannel) bit\n", stderr)
+            fputs("audiocap: Tap format flags: \(format.mFormatFlags), bytesPerFrame: \(format.mBytesPerFrame)\n", stderr)
+        } else {
+            fputs("audiocap: Could not read tap format (OSStatus \(status))\n", stderr)
+        }
+    }
+
+    private func debugAggregateStreams() {
+        // Count input streams
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(aggregateID, &address, 0, nil, &size)
+        let inputStreamCount = status == noErr ? Int(size) / MemoryLayout<AudioStreamID>.size : 0
+        fputs("audiocap: Aggregate input streams: \(inputStreamCount)\n", stderr)
+
+        // Count output streams
+        address.mScope = kAudioObjectPropertyScopeOutput
+        status = AudioObjectGetPropertyDataSize(aggregateID, &address, 0, nil, &size)
+        let outputStreamCount = status == noErr ? Int(size) / MemoryLayout<AudioStreamID>.size : 0
+        fputs("audiocap: Aggregate output streams: \(outputStreamCount)\n", stderr)
+
+        // Read input stream format if available
+        if inputStreamCount > 0 {
+            var streamFormat = AudioStreamBasicDescription()
+            var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            var fmtAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreamFormat,
+                mScope: kAudioObjectPropertyScopeInput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            status = AudioObjectGetPropertyData(aggregateID, &fmtAddress, 0, nil, &fmtSize, &streamFormat)
+            if status == noErr {
+                fputs("audiocap: Aggregate input format: \(streamFormat.mSampleRate) Hz, \(streamFormat.mChannelsPerFrame) ch\n", stderr)
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -101,12 +164,10 @@ final class AudioTapManager {
             mElement: kAudioObjectPropertyElementMain
         )
         var size: UInt32 = 0
-        // First query the size
         var status = AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size)
         guard status == noErr else {
             throw AudioCapError.propertyReadFailed(selector, status)
         }
-        // Then read the value
         let rawPtr = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<CFString>.alignment)
         defer { rawPtr.deallocate() }
         status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, rawPtr)
