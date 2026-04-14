@@ -31,12 +31,17 @@ mcp = FastMCP(
 Meeting recording, transcription, and minutes (PV) server. Any conferencing app.
 Respond in the user's language.
 
-FIRST USE: call meeting_status() to check setup. Offer to configure if the user wants:
-- transcription.language (meeting language, e.g. "fr", "en", "es")
-- transcription.model (tiny/base/small/medium/large-v3-turbo/large-v3)
-- diarization.enabled (true for multi-speaker meetings)
-- transcription.mode (local or remote API)
-Always mention that configuration is optional and defaults work out of the box.
+GREETING: When the user mentions meetings/recording, present these choices:
+1. Check server status (meeting_status)
+2. Configure settings (language, model, diarization, remote API)
+3. Start recording / transcribe / generate minutes
+Mention that configuration is optional — defaults work out of the box.
+
+CONFIGURATION OPTIONS (via meeting_configure):
+- transcription.language: meeting language ("fr", "en", "es", "de", "ja", etc.)
+- transcription.model: tiny, base, small, medium, large-v3-turbo (default), large-v3
+- diarization.enabled: true for multi-speaker identification
+- transcription.mode: "local" (on device) or "remote" (API)
 
 WORKFLOW: record → stop+transcribe (ask participants) → suggest PV → suggest action items
 - Start recording immediately. Do NOT ask for participant names before recording.
