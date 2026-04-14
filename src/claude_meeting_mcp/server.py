@@ -28,20 +28,64 @@ from .transcriber import _get_backend, transcribe_meeting
 mcp = FastMCP(
     "claude-meeting-mcp",
     instructions="""\
-Meeting recording, transcription, and minutes generation.
-Works with any video conferencing app (Google Meet, Teams, Zoom, Slack, Discord).
-Respond in the user's language.
+Meeting recording, transcription, and minutes generation for any video conferencing app.
+Always respond in the user's language.
 
-WORKFLOW — match user intent to the right tool:
-- "record", "enregistre", "start" → meeting_record_start()
-- "stop", "c'est fini", "done", "arrete" → meeting_stop_and_transcribe()
-- "transcribe", "transcris" (existing file) → meeting_transcribe(file_path=...)
-- "meeting minutes", "PV", "proces-verbal", "summary" → generate_meeting_pv()
-- "actions", "todo", "to-do list" → extract_action_items prompt
-- "status", "ca marche?", "ready?" → meeting_status()
-- "settings", "config", "change model" → meeting_configure()
-- "list", "history", "past meetings" → recordings_list() / transcriptions_list() / pvs_list()
-- "cleanup", "delete old" → meeting_cleanup()
+INTENT ROUTING — trigger words by language → tool:
+
+Record / start:
+  EN: "record", "start recording" | FR: "enregistre", "demarre" | ES: "graba", "empieza"
+  IT: "registra", "inizia" | PT: "grava", "comeca" | RU: "запиши", "начни"
+  ZH: "录音", "开始录制" | HE: "הקלט", "התחל הקלטה"
+  → meeting_record_start()
+
+Stop / finish:
+  EN: "stop", "done", "finish" | FR: "stop", "c'est fini", "arrete" | ES: "para", "termina"
+  IT: "ferma", "finito" | PT: "para", "terminou" | RU: "стоп", "закончи"
+  ZH: "停止", "结束" | HE: "עצור", "סיים"
+  → meeting_stop_and_transcribe() (preferred) or meeting_record_stop()
+
+Transcribe:
+  EN: "transcribe" | FR: "transcris" | ES: "transcribe" | IT: "trascrivi"
+  PT: "transcreve" | RU: "транскрибируй" | ZH: "转录" | HE: "תמלל"
+  → meeting_transcribe(file_path=...) for existing files
+  → meeting_stop_and_transcribe() after a recording
+
+Meeting minutes / summary:
+  EN: "minutes", "summary" | FR: "PV", "proces-verbal", "compte-rendu"
+  ES: "acta", "resumen" | IT: "verbale", "riassunto" | PT: "ata", "resumo"
+  RU: "протокол", "резюме" | ZH: "会议纪要", "总结" | HE: "פרוטוקול", "סיכום"
+  → generate_meeting_pv()
+
+Action items / tasks:
+  EN: "actions", "todo" | FR: "actions", "taches" | ES: "tareas", "acciones"
+  IT: "azioni", "compiti" | PT: "acoes", "tarefas" | RU: "задачи", "действия"
+  ZH: "行动项", "任务" | HE: "משימות", "פעולות"
+  → extract_action_items prompt
+
+Status / check:
+  EN: "status", "ready?" | FR: "statut", "ca marche?" | ES: "estado", "funciona?"
+  IT: "stato", "funziona?" | PT: "status", "funciona?" | RU: "статус", "работает?"
+  ZH: "状态", "准备好了吗" | HE: "סטטוס", "מוכן?"
+  → meeting_status()
+
+Settings:
+  EN: "settings", "config" | FR: "configuration", "parametres"
+  ES: "configuracion", "ajustes" | IT: "configurazione", "impostazioni"
+  PT: "configuracao" | RU: "настройки" | ZH: "设置", "配置" | HE: "הגדרות"
+  → meeting_configure()
+
+History:
+  EN: "list", "history", "past meetings" | FR: "liste", "historique", "reunions passees"
+  ES: "lista", "historial" | IT: "lista", "storico" | PT: "lista", "historico"
+  RU: "список", "история" | ZH: "列表", "历史" | HE: "רשימה", "היסטוריה"
+  → recordings_list() / transcriptions_list() / pvs_list()
+
+Cleanup:
+  EN: "cleanup", "delete old" | FR: "nettoyer", "supprimer" | ES: "limpiar", "borrar"
+  IT: "pulisci", "elimina" | PT: "limpar", "apagar" | RU: "очистить", "удалить"
+  ZH: "清理", "删除旧的" | HE: "נקה", "מחק"
+  → meeting_cleanup()
 
 PARAMETERS:
 - Always ask for participant names if not provided
@@ -58,7 +102,11 @@ PARAMETERS:
 
 @mcp.tool()
 def meeting_status() -> dict:
-    """Check meeting server status: platform, audio capture backend, transcription backend."""
+    """Check meeting server status.
+
+    Returns platform, audio capture backend, transcription backend,
+    Whisper model, diarization state, and recording state.
+    """
     capturer = get_capturer()
     config = get_config()
     return {
@@ -77,14 +125,19 @@ def meeting_status() -> dict:
 def meeting_record_start() -> dict:
     """Start recording system audio and microphone.
 
-    Creates a stereo WAV file: left channel = system audio, right channel = microphone.
+    Captures all audio from the computer (any app: Meet, Teams, Zoom, etc.)
+    plus the microphone into a stereo WAV file.
+    Left channel = system/remote audio. Right channel = microphone/local audio.
     """
     return start_recording()
 
 
 @mcp.tool()
 def meeting_record_stop() -> dict:
-    """Stop the current recording and save the WAV file."""
+    """Stop the current recording and save the WAV file.
+
+    Use meeting_stop_and_transcribe() instead if you also want to transcribe.
+    """
     return stop_recording()
 
 
@@ -93,21 +146,31 @@ def meeting_transcribe(
     file_path: Annotated[str, Field(description="Path to the WAV file to transcribe")],
     local_speakers: Annotated[
         str | None,
-        Field(description="Comma-separated names of people at the mic (right channel)"),
+        Field(
+            description=(
+                "Comma-separated names of people at the microphone (right channel). "
+                "Example: 'Alice, Bob'"
+            )
+        ),
     ] = None,
     remote_speakers: Annotated[
         str | None,
-        Field(description="Comma-separated names of people on the call (left channel)"),
+        Field(
+            description=(
+                "Comma-separated names of people on the call (left channel). "
+                "Example: 'Charlie, Diana'"
+            )
+        ),
     ] = None,
     model: Annotated[
         str | None,
         Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
     ] = None,
 ) -> dict:
-    """Transcribe a recorded meeting WAV file.
+    """Transcribe an existing meeting WAV file.
 
-    Splits stereo channels for automatic speaker attribution.
-    Uses the configured Whisper backend (MLX on macOS, faster-whisper elsewhere).
+    Splits stereo channels for speaker attribution.
+    If diarization is enabled, identifies individual speakers per channel.
     """
     local = local_speakers or "Local"
     remote = remote_speakers or "Remote"
@@ -125,20 +188,25 @@ def meeting_transcribe(
 def meeting_stop_and_transcribe(
     local_speakers: Annotated[
         str | None,
-        Field(description="Comma-separated names of people at the mic"),
+        Field(
+            description=("Comma-separated names of people at the microphone. Example: 'Alice, Bob'")
+        ),
     ] = None,
     remote_speakers: Annotated[
         str | None,
-        Field(description="Comma-separated names of people on the call"),
+        Field(
+            description=("Comma-separated names of people on the call. Example: 'Charlie, Diana'")
+        ),
     ] = None,
     model: Annotated[
         str | None,
         Field(description="Whisper model: tiny, base, small, medium, large-v3-turbo, large-v3"),
     ] = None,
 ) -> dict:
-    """Stop a running recording and transcribe it in one step.
+    """Stop the recording and transcribe it in one step.
 
-    More efficient than calling meeting_record_stop + meeting_transcribe separately.
+    Preferred over calling meeting_record_stop + meeting_transcribe separately.
+    Single round-trip for the complete stop-and-transcribe pipeline.
     """
     stop_result = stop_recording()
     if "error" in stop_result:
@@ -153,7 +221,7 @@ def meeting_stop_and_transcribe(
 
 @mcp.tool()
 def get_transcription(
-    meeting_id: Annotated[str, "Meeting identifier (filename without .json)"],
+    meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
 ) -> dict:
     """Retrieve a past transcription by meeting ID."""
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
@@ -165,7 +233,7 @@ def get_transcription(
 
 @mcp.tool()
 def get_pv(
-    meeting_id: Annotated[str, "Meeting identifier"],
+    meeting_id: Annotated[str, Field(description="Meeting identifier")],
 ) -> dict:
     """Retrieve a previously generated meeting minutes (PV)."""
     pv_path = PV_DIR / f"{meeting_id}_pv.md"
@@ -180,13 +248,13 @@ def get_pv(
 
 @mcp.tool()
 def recordings_list() -> list[dict]:
-    """List all available audio recordings with metadata."""
+    """List all available audio recordings with size and date."""
     return list_recordings()
 
 
 @mcp.tool()
 def transcriptions_list() -> list[dict]:
-    """List all available transcriptions."""
+    """List all available transcriptions with date."""
     return list_transcriptions()
 
 
@@ -205,14 +273,20 @@ async def generate_meeting_pv(
     meeting_id: Annotated[str, Field(description="Meeting identifier (filename without .json)")],
     participants: Annotated[
         str | None,
-        Field(description="Comma-separated names of known participants (helps identify speakers)"),
+        Field(
+            description=(
+                "Comma-separated names of all meeting participants. "
+                "Helps Claude identify who said what. Example: 'Alice, Bob, Charlie'"
+            )
+        ),
     ] = None,
 ) -> dict:
     """Generate meeting minutes (PV) from a transcription using AI.
 
-    Uses MCP Sampling: the server asks Claude to summarize the transcription.
-    Claude identifies who is who based on conversation content and participant names.
-    For meetings under 1h: single pass. For longer meetings: map-reduce strategy.
+    Uses MCP Sampling: the server asks Claude to analyze the transcription,
+    identify speakers by their conversation content, and produce structured
+    meeting minutes with decisions, action items, and speaker attribution.
+    For meetings under 1h: single pass. For longer: map-reduce strategy.
     """
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
@@ -246,11 +320,24 @@ async def generate_meeting_pv(
 def meeting_configure(
     key: Annotated[
         str,
-        Field(description="Config key: whisper.model, whisper.mode, diarization.*"),
+        Field(
+            description=(
+                "Config key to modify. "
+                "Options: whisper.model, whisper.mode, whisper.language, "
+                "diarization.enabled, diarization.backend, recording.sample_rate, "
+                "pv.auto_generate, whisper.remote.url, whisper.remote.api_key_env"
+            )
+        ),
     ],
     value: Annotated[str, Field(description="New value for the config key")],
 ) -> dict:
-    """Modify a claude-meeting-mcp configuration parameter."""
+    """Modify a claude-meeting-mcp configuration parameter.
+
+    Common operations:
+    - Change Whisper model: key='whisper.model', value='small'
+    - Enable diarization: key='diarization.enabled', value='true'
+    - Switch to remote: key='whisper.mode', value='remote'
+    """
     try:
         config = update_config(key, value)
         errors = validate_config(config)
@@ -263,7 +350,10 @@ def meeting_configure(
 
 @mcp.tool()
 def meeting_cleanup() -> dict:
-    """Remove meeting audio recordings older than 30 days."""
+    """Remove meeting audio recordings older than 30 days.
+
+    Transcriptions and PVs are kept indefinitely.
+    """
     removed = cleanup_old_recordings()
     return {"removed_count": len(removed), "removed_files": removed}
 
@@ -295,29 +385,38 @@ def pv_resource(meeting_id: str) -> str:
 
 @mcp.prompt()
 def regenerate_pv(meeting_id: str) -> str:
-    """Regenerate a PV with custom instructions."""
+    """Regenerate meeting minutes with custom instructions.
+
+    Use this when the user wants a different format, language, or focus.
+    The user can add instructions after this prompt is loaded.
+    """
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return f"Transcription not found: {meeting_id}"
     t = Transcription.from_json(path.read_text(encoding="utf-8"))
     transcript = json.dumps(t.to_dict(), ensure_ascii=False, indent=2)
     return (
-        f"Voici la transcription de la reunion {meeting_id}. "
-        f"Genere un PV structure en markdown :\n\n{transcript}"
+        f"Here is the transcription of meeting {meeting_id}. "
+        f"Generate structured meeting minutes in the user's language.\n\n"
+        f"{transcript}"
     )
 
 
 @mcp.prompt()
 def extract_action_items(meeting_id: str) -> str:
-    """Extract only action items from a meeting."""
+    """Extract action items and tasks from a meeting.
+
+    Returns a checklist of actions with responsible person and deadline.
+    """
     path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     if not path.exists():
         return f"Transcription not found: {meeting_id}"
     t = Transcription.from_json(path.read_text(encoding="utf-8"))
     transcript = json.dumps(t.to_dict(), ensure_ascii=False, indent=2)
     return (
-        f"Extrais uniquement les actions decidees dans cette reunion. "
-        f"Format : - [ ] Action (responsable, deadline si mentionnee)\n\n{transcript}"
+        f"Extract all action items from this meeting. "
+        f"Format: - [ ] Action (responsible person, deadline if mentioned)\n"
+        f"Respond in the user's language.\n\n{transcript}"
     )
 
 
