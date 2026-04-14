@@ -159,7 +159,14 @@ class WindowsCapturer:
                 self._error = RuntimeError("No audio data captured")
                 return
 
-            stereo = np.column_stack([left[:min_len], right[:min_len]])
+            # Audio processing: normalize → compress → limit
+            from .audio_processing import process_stereo
+
+            left_proc, right_proc = process_stereo(
+                left[:min_len], right[:min_len], sample_rate=self._samplerate
+            )
+
+            stereo = np.column_stack([left_proc, right_proc])
             sf.write(self._output_path, stereo, self._samplerate)
 
         except Exception as e:
