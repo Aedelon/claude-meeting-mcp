@@ -20,6 +20,12 @@ You just talk to Claude naturally: *"Record my meeting"*, *"Transcribe this YouT
 
 ---
 
+## Demo
+
+![Demo](assets/demo.gif)
+
+---
+
 ## Quick Start (5 minutes)
 
 ### Step 1: Install
