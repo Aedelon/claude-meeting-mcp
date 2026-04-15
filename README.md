@@ -1,5 +1,7 @@
 # claude-meeting-mcp
 
+![Hero](assets/hero.png)
+
 An MCP server that records and transcribes any audio — meetings, YouTube videos, podcasts, lectures, interviews, music — with speaker identification and automatic meeting minutes.
 
 Works with **any audio source** on **macOS, Windows, and Linux**.
