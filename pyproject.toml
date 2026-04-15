@@ -1,6 +1,6 @@
 [project]
 name = "claude-meeting-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP Server for meeting recording and transcription — any video conferencing app, any OS"
 readme = "README.md"
 requires-python = ">=3.11"
