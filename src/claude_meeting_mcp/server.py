@@ -426,46 +426,125 @@ def audio_configure(
         config = get_config()
         return {
             "current_config": {
-                "language": config.transcription.language,
-                "model": config.transcription.model,
-                "mode": config.transcription.mode,
-                "diarization": config.diarization.enabled,
-                "diarization_backend": config.diarization.backend,
-                "auto_pv": config.pv.auto_generate,
+                "transcription": {
+                    "language": config.transcription.language,
+                    "model": config.transcription.model,
+                    "mode": config.transcription.mode,
+                    "remote_url": config.transcription.remote.url or "(not set)",
+                },
+                "diarization": {
+                    "enabled": config.diarization.enabled,
+                    "backend": config.diarization.backend,
+                },
+                "live_translation": {
+                    "model": config.live_translation.model,
+                    "target_language": config.live_translation.target_language,
+                    "chunk_seconds": config.live_translation.chunk_seconds,
+                    "window_seconds": config.live_translation.window_seconds,
+                },
+                "pv": {"auto_generate": config.pv.auto_generate},
             },
             "available_settings": [
                 {
-                    "key": "transcription.language",
-                    "description": "Meeting language",
-                    "examples": "en, fr, es, de, ja, zh, ar...",
+                    "category": "Transcription",
+                    "settings": [
+                        {
+                            "key": "transcription.language",
+                            "current": config.transcription.language,
+                            "description": "Audio language (ISO code)",
+                            "examples": "en, fr, es, de, ja, zh, ar, ko, pt, ru",
+                        },
+                        {
+                            "key": "transcription.model",
+                            "current": config.transcription.model,
+                            "description": "Transcription quality/speed",
+                            "options": {
+                                "tiny": "fastest, lowest quality",
+                                "base": "fast, basic quality",
+                                "small": "balanced for short audio",
+                                "medium": "good quality, moderate speed",
+                                "large-v3-turbo": "excellent quality, fast (recommended)",
+                                "large-v3": "best quality, slowest",
+                            },
+                        },
+                        {
+                            "key": "transcription.mode",
+                            "current": config.transcription.mode,
+                            "description": "Where transcription runs",
+                            "options": {"local": "on your machine", "remote": "via API"},
+                        },
+                        {
+                            "key": "transcription.remote.url",
+                            "current": config.transcription.remote.url or "(not set)",
+                            "description": "Remote API URL (only if mode=remote)",
+                            "examples": "https://api.groq.com/openai/v1/audio/transcriptions",
+                        },
+                    ],
                 },
                 {
-                    "key": "transcription.model",
-                    "description": "Transcription quality",
-                    "options": "fast=medium, balanced=large-v3-turbo (default), best=large-v3",
+                    "category": "Speaker Diarization",
+                    "settings": [
+                        {
+                            "key": "diarization.enabled",
+                            "current": config.diarization.enabled,
+                            "description": "Identify individual speakers",
+                            "options": "true / false",
+                            "note": "Requires HF_TOKEN env var",
+                        },
+                        {
+                            "key": "diarization.backend",
+                            "current": config.diarization.backend,
+                            "description": "Diarization engine",
+                            "options": "pyannote / whisperx / none",
+                        },
+                    ],
                 },
                 {
-                    "key": "diarization.enabled",
-                    "description": "Multi-speaker identification",
-                    "options": "true / false",
+                    "category": "Live Translation",
+                    "settings": [
+                        {
+                            "key": "live_translation.model",
+                            "current": config.live_translation.model,
+                            "description": "Model for live transcription (smaller = faster)",
+                            "options": "tiny, base, small, medium (default)",
+                        },
+                        {
+                            "key": "live_translation.target_language",
+                            "current": config.live_translation.target_language,
+                            "description": "Default translation target",
+                            "examples": "en, fr, es, de, ja...",
+                        },
+                        {
+                            "key": "live_translation.chunk_seconds",
+                            "current": config.live_translation.chunk_seconds,
+                            "description": "Update frequency (lower = more responsive)",
+                            "options": "2.0 - 10.0 (default 3.0)",
+                        },
+                        {
+                            "key": "live_translation.window_seconds",
+                            "current": config.live_translation.window_seconds,
+                            "description": "Audio context window (larger = better quality)",
+                            "options": "10.0 - 30.0 (default 15.0)",
+                        },
+                    ],
                 },
                 {
-                    "key": "diarization.backend",
-                    "description": "Diarization engine",
-                    "options": "pyannote / whisperx / none",
-                },
-                {
-                    "key": "pv.auto_generate",
-                    "description": "Auto-generate meeting minutes after transcription",
-                    "options": "true / false",
-                },
-                {
-                    "key": "transcription.mode",
-                    "description": "Local (on device) or remote (API)",
-                    "options": "local / remote",
+                    "category": "Meeting Minutes",
+                    "settings": [
+                        {
+                            "key": "pv.auto_generate",
+                            "current": config.pv.auto_generate,
+                            "description": "Suggest PV generation after transcription",
+                            "options": "true / false",
+                        },
+                    ],
                 },
             ],
-            "hint": "Ask which setting to change, or walk through all of them.",
+            "wizard_hint": (
+                "Walk through settings one at a time. "
+                "Ask one question, apply, confirm, then next or done. "
+                "Never ask API keys in chat — tell user to set env vars."
+            ),
         }
 
     if not value:

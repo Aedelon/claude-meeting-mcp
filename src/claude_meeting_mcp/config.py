@@ -68,9 +68,9 @@ class DiarizationConfig:
 @dataclass
 class LiveTranslationConfig:
     target_language: str = "en"  # "en" = Whisper translate, other = MCP Sampling
-    model: str = "small"  # smaller model for real-time speed
-    chunk_seconds: float = 5.0
-    window_seconds: float = 30.0
+    model: str = "medium"  # balance speed/quality for real-time
+    chunk_seconds: float = 3.0  # how often to transcribe (latency)
+    window_seconds: float = 15.0  # audio context for Whisper (quality)
 
 
 @dataclass

@@ -58,9 +58,9 @@ def test_audio_configure_shows_menu():
     result = audio_configure()
     assert "current_config" in result
     assert "available_settings" in result
-    assert "hint" in result
-    assert result["current_config"]["model"] == "large-v3-turbo"
-    assert len(result["available_settings"]) >= 5
+    assert "wizard_hint" in result
+    assert result["current_config"]["transcription"]["model"] == "large-v3-turbo"
+    assert len(result["available_settings"]) >= 4
 
 
 def test_audio_configure_valid_key():
