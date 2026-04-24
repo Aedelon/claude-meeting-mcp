@@ -66,6 +66,14 @@ class DiarizationConfig:
 
 
 @dataclass
+class LiveTranslationConfig:
+    target_language: str = "en"  # "en" = Whisper translate, other = MCP Sampling
+    model: str = "small"  # smaller model for real-time speed
+    chunk_seconds: float = 5.0
+    window_seconds: float = 30.0
+
+
+@dataclass
 class PVConfig:
     auto_generate: bool = True
 
@@ -75,6 +83,7 @@ class Config:
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
+    live_translation: LiveTranslationConfig = field(default_factory=LiveTranslationConfig)
     pv: PVConfig = field(default_factory=PVConfig)
 
 
@@ -119,6 +128,17 @@ def _apply_toml_to_config(config: Config, data: dict[str, Any]) -> None:
             config.diarization.enabled = bool(d["enabled"])
         if "backend" in d:
             config.diarization.backend = str(d["backend"])
+
+    if "live_translation" in data:
+        lt = data["live_translation"]
+        if "target_language" in lt:
+            config.live_translation.target_language = str(lt["target_language"])
+        if "model" in lt:
+            config.live_translation.model = str(lt["model"])
+        if "chunk_seconds" in lt:
+            config.live_translation.chunk_seconds = float(lt["chunk_seconds"])
+        if "window_seconds" in lt:
+            config.live_translation.window_seconds = float(lt["window_seconds"])
 
     if "pv" in data:
         pv = data["pv"]
@@ -190,6 +210,12 @@ def save_config(config: Config) -> Path:
         f"enabled = {'true' if config.diarization.enabled else 'false'}",
         f'backend = "{config.diarization.backend}"',
         "",
+        "[live_translation]",
+        f'target_language = "{config.live_translation.target_language}"',
+        f'model = "{config.live_translation.model}"',
+        f"chunk_seconds = {config.live_translation.chunk_seconds}",
+        f"window_seconds = {config.live_translation.window_seconds}",
+        "",
         "[pv]",
         f"auto_generate = {'true' if config.pv.auto_generate else 'false'}",
         "",
@@ -248,6 +274,14 @@ def update_config(key: str, value: str) -> Config:
             config.diarization.backend = value
         elif section == "diarization" and field_name == "enabled":
             config.diarization.enabled = value.lower() in ("true", "1", "yes")
+        elif section == "live_translation" and field_name == "target_language":
+            config.live_translation.target_language = value
+        elif section == "live_translation" and field_name == "model":
+            config.live_translation.model = value
+        elif section == "live_translation" and field_name == "chunk_seconds":
+            config.live_translation.chunk_seconds = float(value)
+        elif section == "live_translation" and field_name == "window_seconds":
+            config.live_translation.window_seconds = float(value)
         elif section == "pv" and field_name == "auto_generate":
             config.pv.auto_generate = value.lower() in ("true", "1", "yes")
         else:

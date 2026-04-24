@@ -13,7 +13,7 @@ from pydantic import Field
 from .capture import get_capturer
 from .config import get_config, update_config, validate_config
 from .pv_generator import generate_pv, save_pv
-from .recorder import is_recording, start_recording, stop_recording
+from .recorder import get_live_status, is_recording, start_recording, stop_recording
 from .schemas import Transcription
 from .storage import (
     PV_DIR,
@@ -144,17 +144,31 @@ def audio_status() -> dict:
 
 
 @mcp.tool()
-def audio_record_start() -> dict:
+def audio_record_start(
+    live_translate: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Enable live translation during recording. "
+                "Set to target language code (e.g. 'en' for English). "
+                "Opens a live-updating markdown file with translated text."
+            )
+        ),
+    ] = None,
+) -> dict:
     """Use this when the user wants to record or extract audio from the computer.
 
     Works with: meetings (Meet/Teams/Zoom/Slack/Discord), YouTube videos,
     podcasts, Spotify, lectures, interviews, tutorials — any system audio.
     Also use this to extract text/transcript from a video playing in browser.
     Stereo WAV: left = system audio, right = microphone.
+    With live_translate: translates audio in real-time to a markdown file.
     """
-    result = start_recording()
+    result = start_recording(live_translate=live_translate)
     if "error" not in result:
         result["next_step"] = "When done, call audio_stop_and_transcribe()"
+        if live_translate:
+            result["next_step"] += " | Check live translation: audio_live_status()"
     return _enrich_result(result)
 
 
@@ -169,6 +183,22 @@ def audio_record_stop() -> dict:
     if "error" not in result:
         result["next_step"] = "Transcribe with audio_transcribe(file_path=...)"
     return result
+
+
+@mcp.tool()
+def audio_live_status() -> dict:
+    """Use this to check live translation progress during recording.
+
+    Returns current translated text, elapsed time, segment count,
+    and the path to the live markdown file.
+    Only works while recording with live_translate enabled.
+    """
+    status = get_live_status()
+    if status is None:
+        return {
+            "error": "No live translation active. Use audio_record_start(live_translate='en')",
+        }
+    return status
 
 
 @mcp.tool()
