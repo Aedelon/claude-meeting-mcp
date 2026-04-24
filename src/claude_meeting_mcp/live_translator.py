@@ -147,6 +147,7 @@ class LiveTranslator:
         chunk_seconds: float = 5.0,
         window_seconds: float = 30.0,
         mcp_context=None,
+        event_loop=None,
     ) -> None:
         self._source = source
         self._output_path = Path(output_path)
@@ -155,6 +156,7 @@ class LiveTranslator:
         self._chunk_seconds = chunk_seconds
         self._window_seconds = window_seconds
         self._ctx = mcp_context  # MCP Context for sampling-based translation
+        self._loop = event_loop  # Main asyncio event loop for thread-safe sampling
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -346,22 +348,23 @@ class LiveTranslator:
         )
 
         try:
-            # Call MCP Sampling from the background thread
-            loop = asyncio.new_event_loop()
-            result = loop.run_until_complete(
-                self._ctx.session.create_message(
-                    messages=[
-                        SamplingMessage(
-                            role="user",
-                            content=TextContent(type="text", text=prompt),
-                        )
-                    ],
-                    max_tokens=2048,
-                    system_prompt="You are a translator. Translate accurately and concisely.",
-                    model_preferences={"hints": [{"name": "claude-haiku-4-5-20251001"}]},
-                )
+            if self._loop is None:
+                logger.warning("No event loop — cannot translate via MCP Sampling")
+                return segments
+
+            # Schedule coroutine on the main MCP event loop from this thread
+            coro = self._ctx.session.create_message(
+                messages=[
+                    SamplingMessage(
+                        role="user",
+                        content=TextContent(type="text", text=prompt),
+                    )
+                ],
+                max_tokens=2048,
+                system_prompt="You are a translator. Translate accurately, concisely.",
             )
-            loop.close()
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            result = future.result(timeout=30)  # Wait max 30s
 
             translated_text = (
                 result.content.text if hasattr(result.content, "text") else str(result.content)

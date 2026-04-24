@@ -165,7 +165,10 @@ def audio_record_start(
     Stereo WAV: left = system audio, right = microphone.
     With live_translate: translates audio in real-time to a markdown file.
     """
-    result = start_recording(live_translate=live_translate, mcp_context=ctx)
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    result = start_recording(live_translate=live_translate, mcp_context=ctx, event_loop=loop)
     if "error" not in result:
         result["next_step"] = "When done, call audio_stop_and_transcribe()"
         if live_translate:
