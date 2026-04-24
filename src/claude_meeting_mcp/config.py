@@ -15,11 +15,11 @@ APP_NAME = "claude-meeting-mcp"
 # Model name mappings per backend
 MLX_MODEL_MAP: dict[str, str] = {
     "tiny": "mlx-community/whisper-tiny",
-    "base": "mlx-community/whisper-base",
-    "small": "mlx-community/whisper-small",
-    "medium": "mlx-community/whisper-medium",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
     "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
-    "large-v3": "mlx-community/whisper-large-v3",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
 }
 
 FASTER_MODEL_MAP: dict[str, str] = {

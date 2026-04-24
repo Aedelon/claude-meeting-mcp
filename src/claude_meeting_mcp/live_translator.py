@@ -96,9 +96,13 @@ class FileAudioSource:
             if available <= 0:
                 return None
 
+            # Cap read size to ~5 seconds to avoid loading huge files at once
+            max_bytes = self._sample_rate * 5 * self._frame_size
+            read_size = min(available, max_bytes)
+
             with open(self._path, "rb") as f:
                 f.seek(self._data_offset + self._read_offset)
-                raw = f.read(available)
+                raw = f.read(read_size)
 
             self._read_offset += len(raw)
 
