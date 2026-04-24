@@ -417,9 +417,15 @@ def audio_configure(
     Call WITHOUT parameters to show the configuration menu with current values.
     Call WITH key+value to change a specific setting.
 
-    Walk user through settings one at a time (wizard), ask one question,
-    apply, confirm, then ask "next setting or done?" Show summary at end.
-    NEVER ask API keys in chat — tell user to set env vars.
+    WIZARD MODE: Present each setting as a numbered choice list. Example:
+    "What language are your meetings in?
+     1. English (en)
+     2. French (fr)
+     3. Spanish (es)
+     4. Other (specify)"
+    Wait for the user to pick, apply, confirm, then ask "Next setting or done?"
+    Show final summary when done.
+    NEVER ask API keys in chat — tell user to set env vars or Claude Desktop config.
     """
     # No key = show config menu
     if not key:
@@ -541,8 +547,10 @@ def audio_configure(
                 },
             ],
             "wizard_hint": (
-                "Walk through settings one at a time. "
-                "Ask one question, apply, confirm, then next or done. "
+                "Present each setting as a numbered choice list to the user. "
+                "One setting at a time. Wait for the user to pick before applying. "
+                "After each change: confirm, then ask 'Next setting or all done?' "
+                "Show final summary when user says done. "
                 "Never ask API keys in chat — tell user to set env vars."
             ),
         }
