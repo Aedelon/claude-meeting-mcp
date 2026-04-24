@@ -145,13 +145,14 @@ def audio_status() -> dict:
 
 @mcp.tool()
 def audio_record_start(
+    ctx: Context,
     live_translate: Annotated[
         str | None,
         Field(
             description=(
                 "Enable live translation during recording. "
-                "Set to target language code (e.g. 'en' for English). "
-                "Opens a live-updating markdown file with translated text."
+                "Set to target language code (e.g. 'en', 'fr', 'es'). "
+                "Translates audio in real-time to a markdown file."
             )
         ),
     ] = None,
@@ -164,7 +165,7 @@ def audio_record_start(
     Stereo WAV: left = system audio, right = microphone.
     With live_translate: translates audio in real-time to a markdown file.
     """
-    result = start_recording(live_translate=live_translate)
+    result = start_recording(live_translate=live_translate, mcp_context=ctx)
     if "error" not in result:
         result["next_step"] = "When done, call audio_stop_and_transcribe()"
         if live_translate:

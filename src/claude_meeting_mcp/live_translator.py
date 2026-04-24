@@ -146,6 +146,7 @@ class LiveTranslator:
         model: str = "small",
         chunk_seconds: float = 5.0,
         window_seconds: float = 30.0,
+        mcp_context=None,
     ) -> None:
         self._source = source
         self._output_path = Path(output_path)
@@ -153,6 +154,7 @@ class LiveTranslator:
         self._model = model
         self._chunk_seconds = chunk_seconds
         self._window_seconds = window_seconds
+        self._ctx = mcp_context  # MCP Context for sampling-based translation
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -258,18 +260,32 @@ class LiveTranslator:
             logger.error("Live transcription error: %s", e)
 
     def _do_transcribe(self, audio: np.ndarray) -> list[dict]:
-        """Run Whisper transcription+translation on an audio chunk."""
-        import sys
+        """Transcribe audio, then translate if target != source language."""
 
-        from .config import get_config, get_faster_model_id, get_mlx_model_id
+        from .config import get_config
         from .transcriber import _resample_to_16k
 
-        # Resample to 16kHz
         sr = self._source.get_sample_rate()
         audio = _resample_to_16k(audio, sr)
 
         config = get_config()
+        # If target is English, Whisper can translate directly
+        # Otherwise, transcribe first then translate via MCP Sampling
         task = "translate" if self._target_language == "en" else "transcribe"
+
+        segments = self._whisper_transcribe(audio, config, task)
+
+        # If target != English and we have segments, translate via MCP Sampling
+        if self._target_language != "en" and segments and self._ctx is not None:
+            segments = self._translate_segments(segments)
+
+        return segments
+
+    def _whisper_transcribe(self, audio: np.ndarray, config, task: str) -> list[dict]:
+        """Run Whisper on audio chunk."""
+        import sys
+
+        from .config import get_faster_model_id, get_mlx_model_id
 
         if sys.platform == "darwin":
             try:
@@ -293,7 +309,6 @@ class LiveTranslator:
             except ImportError:
                 pass
 
-        # Fallback: faster-whisper
         try:
             from faster_whisper import WhisperModel
 
@@ -314,6 +329,61 @@ class LiveTranslator:
         except ImportError:
             logger.error("No transcription backend available for live translation")
             return []
+
+    def _translate_segments(self, segments: list[dict]) -> list[dict]:
+        """Translate segment texts via MCP Sampling (Claude Haiku)."""
+        import asyncio
+
+        from mcp.types import SamplingMessage, TextContent
+
+        texts = [s["text"] for s in segments]
+        combined = "\n".join(texts)
+
+        prompt = (
+            f"Translate the following text to {self._target_language}. "
+            f"Return ONLY the translated lines, one per line, same order. "
+            f"No explanations.\n\n{combined}"
+        )
+
+        try:
+            # Call MCP Sampling from the background thread
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(
+                self._ctx.session.create_message(
+                    messages=[
+                        SamplingMessage(
+                            role="user",
+                            content=TextContent(type="text", text=prompt),
+                        )
+                    ],
+                    max_tokens=2048,
+                    system_prompt="You are a translator. Translate accurately and concisely.",
+                    model_preferences={"hints": [{"name": "claude-haiku-4-5-20251001"}]},
+                )
+            )
+            loop.close()
+
+            translated_text = (
+                result.content.text if hasattr(result.content, "text") else str(result.content)
+            )
+            translated_lines = [
+                line.strip() for line in translated_text.strip().split("\n") if line.strip()
+            ]
+
+            # Map translated lines back to segments
+            translated_segments = []
+            for i, seg in enumerate(segments):
+                text = translated_lines[i] if i < len(translated_lines) else seg["text"]
+                translated_segments.append({"start": seg["start"], "end": seg["end"], "text": text})
+
+            logger.info(
+                "Translated %d segments to %s", len(translated_segments), self._target_language
+            )
+            return translated_segments
+
+        except Exception as e:
+            logger.error("Translation via MCP Sampling failed: %s", e)
+            return segments  # Return untranslated as fallback
 
     def _write_markdown(self, final: bool = False) -> None:
         """Write the live translation to a markdown file (atomic write)."""

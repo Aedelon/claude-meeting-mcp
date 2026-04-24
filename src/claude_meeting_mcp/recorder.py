@@ -25,12 +25,13 @@ def _auto_stop() -> None:
     stop_recording()
 
 
-def start_recording(live_translate: str | None = None) -> dict:
+def start_recording(live_translate: str | None = None, mcp_context=None) -> dict:
     """Start recording system audio + microphone.
 
     Args:
-        live_translate: Target language for live translation (e.g., "en").
+        live_translate: Target language for live translation (e.g., "en", "fr").
             None = no live translation.
+        mcp_context: MCP Context for sampling-based translation (any lang).
     """
     global _capturer, _current_file, _timeout_timer, _live_translator
 
@@ -83,6 +84,7 @@ def start_recording(live_translate: str | None = None) -> dict:
                     model=config.live_translation.model,
                     chunk_seconds=config.live_translation.chunk_seconds,
                     window_seconds=config.live_translation.window_seconds,
+                    mcp_context=mcp_context,
                 )
                 _live_translator.start()
                 result["live_translation"] = True
