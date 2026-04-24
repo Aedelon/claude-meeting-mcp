@@ -118,7 +118,7 @@ def test_validate_invalid_diarization_backend():
 
 def test_mlx_model_mapping():
     assert get_mlx_model_id("tiny") == "mlx-community/whisper-tiny"
-    assert get_mlx_model_id("large-v3") == "mlx-community/whisper-large-v3"
+    assert get_mlx_model_id("large-v3") == "mlx-community/whisper-large-v3-mlx"
     assert get_mlx_model_id("unknown") == "mlx-community/whisper-large-v3-turbo"
 
 
