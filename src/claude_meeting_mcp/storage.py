@@ -90,13 +90,46 @@ def list_pvs() -> list[dict]:
     return pvs
 
 
-def cleanup_old_recordings() -> list[str]:
-    """Remove recordings older than RETENTION_DAYS."""
+def cleanup_old_files() -> list[str]:
+    """Remove old files based on retention policy.
+
+    - WAV recordings: >7 days
+    - Live translation .md: >24 hours
+    - Transcriptions .json: >30 days
+    - PV .md: >30 days
+    """
     ensure_dirs()
-    cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
     removed = []
+
+    # WAV recordings: 7 days
+    wav_cutoff = datetime.now() - timedelta(days=7)
     for f in RECORDINGS_DIR.glob("*.wav"):
-        if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+        if datetime.fromtimestamp(f.stat().st_mtime) < wav_cutoff:
             f.unlink()
-            removed.append(f.name)
+            removed.append(f"recordings/{f.name}")
+
+    # Live translation: 24 hours
+    live_cutoff = datetime.now() - timedelta(hours=24)
+    for f in TRANSCRIPTIONS_DIR.glob("*_live.md"):
+        if datetime.fromtimestamp(f.stat().st_mtime) < live_cutoff:
+            f.unlink()
+            removed.append(f"transcriptions/{f.name}")
+
+    # Transcriptions: 30 days
+    trans_cutoff = datetime.now() - timedelta(days=30)
+    for f in TRANSCRIPTIONS_DIR.glob("*.json"):
+        if datetime.fromtimestamp(f.stat().st_mtime) < trans_cutoff:
+            f.unlink()
+            removed.append(f"transcriptions/{f.name}")
+
+    # PV: 30 days
+    for f in PV_DIR.glob("*.md"):
+        if datetime.fromtimestamp(f.stat().st_mtime) < trans_cutoff:
+            f.unlink()
+            removed.append(f"pv/{f.name}")
+
     return removed
+
+
+# Keep old name as alias for backward compatibility
+cleanup_old_recordings = cleanup_old_files

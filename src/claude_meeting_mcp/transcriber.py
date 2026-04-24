@@ -366,6 +366,13 @@ def transcribe_meeting(
     output_path = TRANSCRIPTIONS_DIR / f"{meeting_id}.json"
     output_path.write_text(transcription.to_json(), encoding="utf-8")
 
+    # Delete WAV after successful transcription — no longer needed
+    try:
+        wav.unlink()
+        logger.info("Deleted WAV after transcription: %s", wav_path)
+    except OSError as e:
+        logger.warning("Could not delete WAV: %s", e)
+
     elapsed = time.monotonic() - t0
     logger.info(
         "Transcription complete: %d segments, %.1fs elapsed (backend=%s)",
