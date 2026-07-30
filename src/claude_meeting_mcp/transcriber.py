@@ -9,6 +9,11 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+# Import scipy.signal at module load (main thread). Importing it lazily inside
+# the parallel transcription worker threads deadlocks on Windows: the two
+# threads race the import lock and the winner hangs loading scipy's OpenBLAS
+# extension DLL under the Windows loader lock.
+from scipy.signal import resample
 
 from .config import get_config, get_faster_model_id, get_mlx_model_id
 from .schemas import Segment, Transcription
@@ -182,7 +187,6 @@ def _resample_to_16k(audio: np.ndarray, samplerate: int) -> np.ndarray:
     """Resample audio to 16kHz (what Whisper expects internally)."""
     if samplerate == WHISPER_SAMPLE_RATE:
         return audio
-    from scipy.signal import resample
 
     new_length = int(len(audio) * WHISPER_SAMPLE_RATE / samplerate)
     logger.info(
