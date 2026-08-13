@@ -184,20 +184,32 @@ WHISPER_SAMPLE_RATE = 16000
 
 
 def _resample_to_16k(audio: np.ndarray, samplerate: int) -> np.ndarray:
-    """Resample audio to 16kHz (what Whisper expects internally)."""
+    """Resample audio to 16kHz (what Whisper expects internally).
+
+    Polyphase (FIR), not scipy.signal.resample (FFT), for two reasons. pocketfft
+    caches an FFT plan per distinct transform length and never evicts it; since
+    every recording has a unique sample count that cache never hits and only
+    grows - a day-old server held 12 GB across 89 dead plans. FFT resampling also
+    assumes a periodic signal, so it wraps the end of a recording into its start.
+    """
     if samplerate == WHISPER_SAMPLE_RATE:
         return audio
-    from scipy.signal import resample
+    from math import gcd
 
-    new_length = int(len(audio) * WHISPER_SAMPLE_RATE / samplerate)
+    from scipy.signal import resample_poly
+
+    divisor = gcd(WHISPER_SAMPLE_RATE, samplerate)
+    up, down = WHISPER_SAMPLE_RATE // divisor, samplerate // divisor
     logger.info(
-        "Resampling %d Hz → %d Hz (%d → %d samples)",
+        "Resampling %d Hz → %d Hz (%d → %d samples, %d/%d)",
         samplerate,
         WHISPER_SAMPLE_RATE,
         len(audio),
-        new_length,
+        int(len(audio) * WHISPER_SAMPLE_RATE / samplerate),
+        up,
+        down,
     )
-    return resample(audio, new_length).astype(np.float32)
+    return resample_poly(audio, up, down).astype(np.float32)
 
 
 def transcribe_channel(audio: np.ndarray, samplerate: int, model: str | None = None) -> list[dict]:

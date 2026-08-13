@@ -1,12 +1,16 @@
 """Tests for transcriber module."""
 
+import gc
+import sys
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from claude_meeting_mcp.schemas import Segment, Transcription
 from claude_meeting_mcp.transcriber import (
     _get_backend,
+    _resample_to_16k,
     merge_segments,
     split_channels,
 )
@@ -143,3 +147,52 @@ def test_transcribe_channel_faster_dispatch(mock_backend):
         mock_faster.assert_called_once()
         assert len(result) == 1
         assert result[0]["text"] == "test faster"
+
+
+def test_resample_preserves_length_and_content():
+    """_resample_to_16k must hit the exact target length for every supported rate."""
+    for sr in (16000, 22050, 44100, 48000):
+        t = np.arange(int(sr * 2.0)) / sr
+        audio = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+        out = _resample_to_16k(audio, sr)
+
+        assert out.dtype == np.float32
+        assert abs(len(out) - int(len(audio) * 16000 / sr)) <= 1, f"wrong length for {sr} Hz"
+        # A 440 Hz tone survives the anti-alias filter with its amplitude intact.
+        assert 0.4 < float(np.abs(out[1000:-1000]).max()) < 0.6, f"tone distorted at {sr} Hz"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="resource is POSIX-only")
+def test_resample_does_not_accumulate_memory_across_distinct_lengths():
+    """Resampling must not retain memory keyed on audio length.
+
+    scipy.signal.resample is FFT-based and pocketfft caches a plan per distinct
+    transform length, forever. Every recording has a unique sample count, so the
+    cache never hit and grew ~95 MB per transcription: a day-old server held
+    12 GB across 89 dead plans. Same lesson as _mlx, different allocator.
+    """
+    import resource
+
+    # ru_maxrss is bytes on macOS, kilobytes on Linux.
+    to_mb = 1024**2 if sys.platform == "darwin" else 1024
+
+    def peak_mb() -> float:
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / to_mb
+
+    lengths = [60, 67, 74, 81, 88, 95, 102, 109]  # distinct, as real recordings are
+
+    # Warm up on an input longer than any below, so the high-water mark this
+    # measures can only come from retention, not from a bigger transient buffer.
+    _resample_to_16k(np.zeros(120 * 48000, dtype=np.float32), 48000)
+    gc.collect()
+    before = peak_mb()
+
+    for secs in lengths:
+        _resample_to_16k(np.zeros(int(secs * 48000), dtype=np.float32), 48000)
+        gc.collect()
+
+    grew_mb = peak_mb() - before
+    # Nothing here allocates past the warm-up peak unless plans are retained,
+    # which cost ~95 MB per distinct length (measured 1108 MB before the fix).
+    assert grew_mb < 100, f"resampling retained {grew_mb:.0f} MB across {len(lengths)} lengths"
