@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from . import _mlx
 from .config import get_config, get_faster_model_id, get_mlx_model_id
 from .schemas import Segment, Transcription
 from .storage import TRANSCRIPTIONS_DIR, ensure_dirs
@@ -63,16 +64,20 @@ def _transcribe_mlx(audio: np.ndarray, samplerate: int, model: str | None = None
     language = config.transcription.language
 
     audio = audio.astype(np.float32, copy=False)
-    result = mlx_whisper.transcribe(
-        audio,
-        path_or_hf_repo=model_id,
-        language=language,
-        word_timestamps=True,
-        condition_on_previous_text=False,
-        hallucination_silence_threshold=1.0,
-        compression_ratio_threshold=2.4,
-        no_speech_threshold=0.6,
-    )
+    _mlx.cap_cache()
+    try:
+        result = mlx_whisper.transcribe(
+            audio,
+            path_or_hf_repo=model_id,
+            language=language,
+            word_timestamps=True,
+            condition_on_previous_text=False,
+            hallucination_silence_threshold=1.0,
+            compression_ratio_threshold=2.4,
+            no_speech_threshold=0.6,
+        )
+    finally:
+        _mlx.clear_cache()
     return result.get("segments", [])
 
 
