@@ -293,16 +293,25 @@ class LiveTranslator:
             try:
                 import mlx_whisper
 
+                from . import _mlx
+
+                _mlx.cap_cache()
+
                 model_id = get_mlx_model_id(self._model)
-                result = mlx_whisper.transcribe(
-                    audio.astype(np.float32, copy=False),
-                    path_or_hf_repo=model_id,
-                    language=config.transcription.language,
-                    task=task,
-                    word_timestamps=False,
-                    condition_on_previous_text=False,
-                    hallucination_silence_threshold=1.0,
-                )
+                try:
+                    result = mlx_whisper.transcribe(
+                        audio.astype(np.float32, copy=False),
+                        path_or_hf_repo=model_id,
+                        language=config.transcription.language,
+                        task=task,
+                        word_timestamps=False,
+                        condition_on_previous_text=False,
+                        hallucination_silence_threshold=1.0,
+                    )
+                finally:
+                    # Runs every chunk_seconds for the whole meeting, so the
+                    # cache must be drained per chunk, not per meeting.
+                    _mlx.clear_cache()
                 return [
                     {"start": s["start"], "end": s["end"], "text": s["text"].strip()}
                     for s in result.get("segments", [])
