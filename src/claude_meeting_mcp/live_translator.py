@@ -287,7 +287,9 @@ class LiveTranslator:
         """Run Whisper on audio chunk."""
         import sys
 
-        from .config import get_faster_model_id, get_mlx_model_id
+        from .config import get_faster_model_id, get_mlx_model_id, whisper_language
+
+        language = whisper_language(config.transcription.language)
 
         if sys.platform == "darwin":
             try:
@@ -297,7 +299,7 @@ class LiveTranslator:
                 result = mlx_whisper.transcribe(
                     audio.astype(np.float32, copy=False),
                     path_or_hf_repo=model_id,
-                    language=config.transcription.language,
+                    language=language,
                     task=task,
                     word_timestamps=False,
                     condition_on_previous_text=False,
@@ -318,7 +320,8 @@ class LiveTranslator:
             model = WhisperModel(model_id, device="auto", compute_type="auto")
             segments_gen, info = model.transcribe(
                 audio.astype(np.float32, copy=False),
-                language=config.transcription.language,
+                language=language,
+                multilingual=language is None,
                 task=task,
                 word_timestamps=False,
                 vad_filter=True,

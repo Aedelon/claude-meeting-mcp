@@ -214,3 +214,18 @@ def test_update_config_pv_auto_generate(monkeypatch, tmp_path):
 
     updated = update_config("pv.auto_generate", "false")
     assert updated.pv.auto_generate is False
+
+
+def test_whisper_language_auto_and_empty():
+    from claude_meeting_mcp.config import whisper_language
+
+    assert whisper_language("auto") is None
+    assert whisper_language("") is None
+    assert whisper_language(" Auto ") is None
+
+
+def test_whisper_language_code():
+    from claude_meeting_mcp.config import whisper_language
+
+    assert whisper_language("de") == "de"
+    assert whisper_language("EN") == "en"

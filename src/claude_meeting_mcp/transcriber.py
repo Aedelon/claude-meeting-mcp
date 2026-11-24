@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .config import get_config, get_faster_model_id, get_mlx_model_id
+from .config import get_config, get_faster_model_id, get_mlx_model_id, whisper_language
 from .schemas import Segment, Transcription
 from .storage import TRANSCRIPTIONS_DIR, ensure_dirs
 
@@ -60,7 +60,7 @@ def _transcribe_mlx(audio: np.ndarray, samplerate: int, model: str | None = None
 
     config = get_config()
     model_id = get_mlx_model_id(model or config.transcription.model)
-    language = config.transcription.language
+    language = whisper_language(config.transcription.language)
 
     audio = audio.astype(np.float32, copy=False)
     result = mlx_whisper.transcribe(
@@ -83,7 +83,7 @@ def _transcribe_faster(audio: np.ndarray, samplerate: int, model: str | None = N
 
     config = get_config()
     model_id = get_faster_model_id(model or config.transcription.model)
-    language = config.transcription.language
+    language = whisper_language(config.transcription.language)
 
     # Cache model singleton (reload if model changed)
     if _faster_model is None or _faster_model_name != model_id:
@@ -94,6 +94,8 @@ def _transcribe_faster(audio: np.ndarray, samplerate: int, model: str | None = N
     segments_gen, info = _faster_model.transcribe(
         audio,
         language=language,
+        # Detect the language per segment, for meetings that switch languages
+        multilingual=language is None,
         word_timestamps=False,
         vad_filter=True,
     )
@@ -122,16 +124,17 @@ def _transcribe_remote_channel(wav_path: str, channel: str = "left") -> list[dic
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    data = {"model": config.transcription.model, "response_format": "verbose_json"}
+    language = whisper_language(config.transcription.language)
+    if language:
+        data["language"] = language
+
     with open(wav_path, "rb") as f:
         response = httpx.post(
             url,
             headers=headers,
             files={"file": (f"audio_{channel}.wav", f, "audio/wav")},
-            data={
-                "model": config.transcription.model,
-                "language": config.transcription.language,
-                "response_format": "verbose_json",
-            },
+            data=data,
             timeout=300.0,
         )
 

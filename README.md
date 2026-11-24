@@ -257,7 +257,7 @@ The configuration file is created automatically at the platform-appropriate loca
 ```toml
 [transcription]
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3-turbo, large-v3
-language = "en"             # meeting language (auto-detected if empty)
+language = "en"             # meeting language, or "auto" to detect it
 mode = "local"              # "local" (on your machine) or "remote" (API)
 
 [transcription.remote]
@@ -393,6 +393,7 @@ Full list: [openai/whisper — supported languages](https://github.com/openai/wh
 ```
 audio_configure("transcription.language", "fr")   # French meeting
 audio_configure("transcription.language", "ja")   # Japanese meeting
+audio_configure("transcription.language", "auto") # detect it (per segment with faster-whisper)
 ```
 
 **Meeting minutes**: generated in the same language as the transcription. If the meeting is in French, the PV will be in French.
