@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # Flush interval for incremental WAV writing (seconds)
 _FLUSH_INTERVAL = 0.5
 
+# Seconds to wait for a pactl query
+_PACTL_TIMEOUT = 5
+
 
 def _detect_audio_server() -> str:
     """Detect whether PipeWire or PulseAudio is running."""
@@ -22,7 +25,7 @@ def _detect_audio_server() -> str:
             ["pactl", "info"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_PACTL_TIMEOUT,
         )
         output = result.stdout.lower()
         if "pipewire" in output:
@@ -34,22 +37,59 @@ def _detect_audio_server() -> str:
     return "unknown"
 
 
+def _default_sink() -> str | None:
+    """Return the name of the default sink, where applications play by default."""
+    try:
+        result = subprocess.run(
+            ["pactl", "get-default-sink"],
+            capture_output=True,
+            text=True,
+            timeout=_PACTL_TIMEOUT,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        # pactl < 15 has no get-default-sink
+        result = subprocess.run(
+            ["pactl", "info"],
+            capture_output=True,
+            text=True,
+            timeout=_PACTL_TIMEOUT,
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("Default Sink:"):
+                return line.split(":", 1)[1].strip() or None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def _find_monitor_source() -> str | None:
-    """Find the monitor source for system audio capture."""
+    """Find the monitor source for system audio capture.
+
+    Prefers the monitor of the default sink. With several outputs (onboard,
+    HDMI, USB headset), the first monitor in the list is often not the one
+    the meeting audio is played on.
+    """
     try:
         result = subprocess.run(
             ["pactl", "list", "sources", "short"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_PACTL_TIMEOUT,
         )
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split("\t")
-            if len(parts) >= 2 and ".monitor" in parts[1]:
-                return parts[1]
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return None
+        return None
+
+    monitors = []
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[1].endswith(".monitor"):
+            monitors.append(parts[1])
+
+    sink = _default_sink()
+    if sink and f"{sink}.monitor" in monitors:
+        return f"{sink}.monitor"
+    return monitors[0] if monitors else None
 
 
 class LinuxCapturer:
