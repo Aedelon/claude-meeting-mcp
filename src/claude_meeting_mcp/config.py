@@ -225,6 +225,18 @@ def save_config(config: Config) -> Path:
     return config_path
 
 
+AUTO_LANGUAGE = "auto"
+
+
+def whisper_language(language: str) -> str | None:
+    """Return the language code for Whisper, or None to detect the language.
+
+    "auto" and an empty value both mean: detect it.
+    """
+    code = language.strip().lower()
+    return None if code in ("", AUTO_LANGUAGE) else code
+
+
 def get_mlx_model_id(model_name: str) -> str:
     """Get MLX model HuggingFace repo ID from generic model name."""
     return MLX_MODEL_MAP.get(model_name, MLX_MODEL_MAP["large-v3-turbo"])

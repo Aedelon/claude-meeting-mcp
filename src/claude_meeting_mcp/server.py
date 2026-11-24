@@ -460,8 +460,8 @@ def audio_configure(
                         {
                             "key": "transcription.language",
                             "current": config.transcription.language,
-                            "description": "Audio language (ISO code)",
-                            "examples": "en, fr, es, de, ja, zh, ar, ko, pt, ru",
+                            "description": "Audio language (ISO code), or auto to detect it",
+                            "examples": "auto, en, fr, es, de, ja, zh, ar, ko, pt, ru",
                         },
                         {
                             "key": "transcription.model",

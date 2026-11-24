@@ -1,6 +1,6 @@
 """Tests for transcriber module."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -143,3 +143,34 @@ def test_transcribe_channel_faster_dispatch(mock_backend):
         mock_faster.assert_called_once()
         assert len(result) == 1
         assert result[0]["text"] == "test faster"
+
+
+def _run_faster(language):
+    """Run _transcribe_faster with a fake model; return the kwargs given to it."""
+    import claude_meeting_mcp.transcriber as tr
+
+    model = MagicMock()
+    model.transcribe.return_value = (iter([]), None)
+    config = MagicMock()
+    config.transcription.language = language
+    config.transcription.model = "large-v3-turbo"
+    with (
+        patch.dict("sys.modules", {"faster_whisper": MagicMock()}),
+        patch.object(tr, "_faster_model", model),
+        patch.object(tr, "_faster_model_name", tr.get_faster_model_id("large-v3-turbo")),
+        patch.object(tr, "get_config", return_value=config),
+    ):
+        tr._transcribe_faster(np.zeros(16000, dtype=np.float32), 16000)
+    return model.transcribe.call_args.kwargs
+
+
+def test_faster_auto_language_detects_per_segment():
+    kwargs = _run_faster("auto")
+    assert kwargs["language"] is None
+    assert kwargs["multilingual"] is True
+
+
+def test_faster_fixed_language():
+    kwargs = _run_faster("de")
+    assert kwargs["language"] == "de"
+    assert kwargs["multilingual"] is False
